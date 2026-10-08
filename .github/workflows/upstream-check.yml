@@ -1,0 +1,57 @@
+name: upstream-check
+
+# Weekly: compare the files imported from ECC (upstream.lock) with upstream
+# and keep one open issue listing what changed, so updates are pulled on purpose.
+on:
+  schedule:
+    - cron: "0 9 * * 1"   # Mondays 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compare imported files with upstream
+        id: status
+        run: |
+          scripts/sync-upstream | tee status.txt
+          changed=$(awk 'NR > 1 && $0 !~ /up to date$/' status.txt)
+          {
+            echo "changed<<EOF"
+            echo "$changed"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the upstream issue
+        if: steps.status.outputs.changed != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGED: ${{ steps.status.outputs.changed }}
+        run: |
+          title="Upstream ECC changed imported files"
+          {
+            echo "ECC (affaan-m/ECC) changed files this repo imported. Review each with"
+            echo '`scripts/sync-upstream diff <path>` and pull it with `scripts/sync-upstream take <path>`.'
+            echo
+            echo '```'
+            head -1 status.txt
+            echo "$CHANGED"
+            echo '```'
+          } > body.md
+          number=$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[0].number')
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md
+          fi
