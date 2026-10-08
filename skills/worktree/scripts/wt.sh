@@ -11,16 +11,19 @@ set -euo pipefail
 DIR=.claude/worktrees
 die() { echo "wt: $*" >&2; exit 1; }
 
-main_root() { # the main checkout of the repository we are in
+main_root() { # the main checkout of the repository at $1 (default: the one we are in)
   local common
-  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || die "not inside a git repository"
+  common=$(git -C "${1:-.}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || die "not inside a git repository"
   dirname "$common"
 }
 
-default_base() { # origin/HEAD when the remote has one, else origin/main
+default_base() { # the remote's default branch, else the local HEAD
   local root=$1 ref
-  ref=$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) || ref=origin/main
-  echo "$ref"
+  if ref=$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null); then echo "$ref"; return; fi
+  ref=$(git -C "$root" ls-remote --symref origin HEAD 2>/dev/null | sed -n 's#^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$#\1#p')
+  if [[ -n $ref ]] && git -C "$root" rev-parse -q --verify "refs/remotes/origin/$ref" >/dev/null; then echo "origin/$ref"; return; fi
+  git -C "$root" rev-parse -q --verify HEAD >/dev/null || die "no commit to start from; pass a base"
+  echo HEAD
 }
 
 ensure_exclude() { # .claude/worktrees/ never shows in git status and is never committed
@@ -40,10 +43,15 @@ cmd_add() {
   if git -C "$root" show-ref -q --verify "refs/heads/$branch"; then
     die "branch $branch already exists; check whose it is (git log $branch) before using it, or pick another name"
   fi
-  ensure_exclude "$root"
   git -C "$root" fetch -q origin 2>/dev/null || true
+  if [[ -z $base ]] && git -C "$root" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then
+    base=origin/$branch # a branch only on the remote, e.g. a pull request to review: track it
+  fi
   base=${base:-$(default_base "$root")}
+  git -C "$root" rev-parse -q --verify "$base^{commit}" >/dev/null || die "no commit $base"
+  ensure_exclude "$root"
   git -C "$root" worktree add -q -b "$branch" "$path" "$base"
+  [[ $base == "origin/$branch" ]] && git -C "$path" branch -q --set-upstream-to="origin/$branch"
   echo "$path  [$branch from $base]"
 }
 
@@ -51,6 +59,8 @@ in_use() { # a process or a compose project working inside the worktree
   local path=$1 pid cwd
   for pid in $(pgrep -u "$(id -u)" . 2>/dev/null); do
     [[ $pid == "$$" || $pid == "$PPID" ]] && continue
+    # Our own pipeline siblings (wt.sh rm x | cat) share our parent; they are not "in use".
+    [[ $(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null) == "$PPID" ]] && continue
     cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
     [[ $cwd == "$path" || $cwd == "$path"/* ]] && { echo "process $pid ($(cat "/proc/$pid/comm" 2>/dev/null)) runs in $cwd"; return 0; }
   done
@@ -63,9 +73,9 @@ in_use() { # a process or a compose project working inside the worktree
 }
 
 cmd_rm() {
-  local name=${1:?usage: wt.sh rm <name|path> [--keep-branch]} keep=${2:-} root path branch dirty ignored unpushed backup user
-  root=$(main_root); path="$root/$DIR/$name"
-  [[ -d $path ]] || path=$(cd "$name" 2>/dev/null && pwd -P) || die "no worktree $name"
+  local name=${1:?usage: wt.sh rm <name|path> [--keep-branch]} keep=${2:-} root path branch dirty unpushed backup user entry f
+  if [[ -d $name && $name == */* ]]; then root=$(main_root "$name"); path=$name; else root=$(main_root); path="$root/$DIR/$name"; fi
+  [[ -d $path ]] || die "no worktree $name"
   cd "$root" # so this script's own subshells don't count as running inside the worktree
   path=$(cd "$path" && pwd -P)
   [[ $path == "$(cd "$root" && pwd -P)" ]] && die "that is the main checkout"
@@ -89,16 +99,22 @@ $dirty"
   fi
 
   # git worktree remove deletes ignored files too. Copy out anything that is not a cache, and check the copies.
-  ignored=$(git -C "$path" status --porcelain --ignored | sed -n 's/^!! //p' | grep -Ev "$CACHE_RE" || true)
-  if [[ -n $ignored ]]; then
+  local -a keep_files=()
+  while IFS= read -r -d '' entry; do
+    [[ $entry == '!! '* ]] || continue
+    f=${entry#'!! '}
+    [[ $f =~ $CACHE_RE ]] || keep_files+=("$f")
+  done < <(git -C "$path" status --porcelain=v1 -z --ignored)
+  if [[ ${#keep_files[@]} -gt 0 ]]; then
     backup="$root/$DIR/.removed/$(basename "$path")-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$backup"
-    while IFS= read -r f; do
+    for f in "${keep_files[@]}"; do
       mkdir -p "$backup/$(dirname "$f")"
-      cp -a "$path/$f" "$backup/$f" 2>/dev/null || die "could not copy $f out; nothing was removed"
-      [[ -e $backup/$f ]] || die "copy of $f missing in $backup; nothing was removed"
-    done <<<"$ignored"
-    echo "kept the ignored files in $backup:"; sed 's/^/  /' <<<"$ignored"
+      if ! cp -a "$path/$f" "$backup/$f" 2>/dev/null || [[ ! -e $backup/$f ]]; then
+        rm -rf "$backup"; die "could not copy $f out; nothing was removed"
+      fi
+    done
+    echo "kept the ignored files in $backup:"; printf '  %s\n' "${keep_files[@]}"
   fi
 
   git -C "$root" worktree remove --force "$path"
@@ -125,12 +141,13 @@ cmd_list() {
   fi
   for r in "${repos[@]}"; do
     [[ -d $r/.git ]] || die "no repository at $r"
-    slug=$(git -C "$r" remote get-url origin 2>/dev/null | sed -E 's#^(git@github.com:|https://github.com/)##; s#\.git$##')
+    slug=$(git -C "$r" remote get-url origin 2>/dev/null | sed -E 's#^(git@github.com:|https://github.com/)##; s#\.git$##' || true)
     echo "== $(basename "$r")${slug:+  ($slug)}"
     while IFS= read -r w; do
+      if [[ ! -d $w ]]; then printf '  %-55s (folder gone: git worktree prune)\n' "${w/#$HOME/\~}"; continue; fi
       b=$(git -C "$w" branch --show-current 2>/dev/null) || b="?"
-      d=$(git -C "$w" status --porcelain 2>/dev/null | wc -l)
-      size=$(du -sh "$w" 2>/dev/null | cut -f1)
+      d=$(git -C "$w" status --porcelain 2>/dev/null | wc -l || true)
+      size=$(du -sh "$w" 2>/dev/null | cut -f1 || true)
       pr=""
       if [[ -n $b && -n $slug ]] && command -v gh >/dev/null 2>&1; then
         pr=$(gh pr list -R "$slug" --head "$b" --state all --json number,state \

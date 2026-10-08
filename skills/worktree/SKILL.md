@@ -8,16 +8,18 @@ argument-hint: "add <name> [branch] [base] | rm <name> | list"
 
 Every worktree goes inside its own repository, at `<repo>/.claude/worktrees/<name>`, never beside it. Run each step through the script in this skill's folder, from inside the repository: `bash <this skill's folder>/scripts/wt.sh <add|rm|list> ...`.
 
-- `add <name> [branch] [base]` makes the worktree on a new branch, from the remote's default branch unless you give a base. It also adds `.claude/worktrees/` to the repository's `.git/info/exclude`, so git never shows or commits it.
+- `add <name> [branch] [base]` makes the worktree on a new branch, from the remote's default branch unless you give a base. A branch that exists only on the remote (a pull request to review) is tracked instead. It also adds `.claude/worktrees/` to the repository's `.git/info/exclude`, so git never shows or commits it.
 - `rm <name> [--keep-branch]` removes one worktree and its local branch, once nothing would be lost. It refuses when:
   - there are uncommitted changes;
   - there are commits on no remote;
   - a process or a compose project is running inside the worktree.
 
+  The process check reads `/proc`, so on macOS only containers are detected.
+
   Ignored files that are not caches (`.env`, local data) are copied to `.claude/worktrees/.removed/` and checked before the remove.
 - `list [repo...]` shows each worktree with its branch, size, uncommitted changes and pull request (when `gh` is installed). With no argument it lists the current repository, or every repository under the folders in `WT_ROOTS` (colon-separated).
 
-The plugin's `worktree-guard` hook backs this up. A bare `git worktree remove`, `git reset --hard`, `git checkout -- <path>`, `git restore` or `git clean -f` that would throw away local work asks the user first and names what would be lost.
+The plugin's `worktree-guard` hook backs this up. A bare `git worktree remove`, `git reset --hard`, `git checkout -- <path>`, `git checkout -f`, `git switch --discard-changes`, `git restore` or `git clean -f` that would throw away local work asks the user first and names what would be lost.
 
 ## Rules
 
