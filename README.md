@@ -1,18 +1,21 @@
 # ecc
 
-A Claude Code-only cut of [ECC](https://github.com/affaan-m/ECC): the few pieces
-worth having, plus a guard for infrastructure work. ECC's full install brings 361
-skills and agents (about 26k tokens of descriptions in every session) and 24 hooks;
-this keeps four of its flows and adds nothing that runs on every tool call except
-two cheap Bash checks.
+A Claude Code-only cut of [ECC](https://github.com/affaan-m/ECC): the pieces worth
+having, plus two guards of its own. ECC's full install brings 361 skills and agents
+(about 26k tokens of descriptions in every session) and 24 hooks; this keeps the
+parts that earn their place.
 
 | Piece | What it does | Source |
 |-------|--------------|--------|
 | prod guard | `tofu`/`terraform`/`terragrunt` apply, destroy, import and state edits, and AWS `delete-*`/`terminate-*`/`s3 rm` calls always ask you, even in auto mode, naming the AWS profile in use | own |
+| suppression guard | an edit that adds `# noqa`, `# type: ignore`, `# pyrefly: ignore`, `//nolint`, Dart `// ignore:`, `# tflint-ignore` and the like, or loosens a ruff/pyrefly/import-linter/golangci/`analysis_options`/tflint config, asks you first; moving or removing suppressions never does | own |
 | GateGuard | before a destructive shell command (`rm -rf`, force push to main, `DROP TABLE`…) Claude must list what it touches, a rollback step and your instruction, then retry | ECC |
 | strategic compact | suggests `/compact` at natural breakpoints instead of letting auto-compaction hit mid-task | ECC |
 | verification loop | skill: build, types, lint, tests and a diff review before calling work done | ECC |
 | save / resume session | `/ecc:save-session` writes where you left off; `/ecc:resume-session` picks it up | ECC |
+| learn-eval | `/ecc:learn-eval` after solving something non-trivial: extracts the reusable lesson, checks it's worth keeping, saves it as a global or project skill with your approval | ECC |
+| silent-failure-hunter | agent that reviews for swallowed errors, bad fallbacks and lost error propagation (Python `except`, Go `_ = err`) | ECC |
+| Flutter | `flutter-reviewer` and `dart-build-resolver` agents, `/ecc:flutter-review`, `/ecc:flutter-build`, `/ecc:flutter-test`, the `dart-flutter-patterns` skill and an `accessibility` (WCAG 2.2, iOS/Android) skill | ECC |
 
 GateGuard runs on Bash only. Its edit gate (facts before the first edit of each
 file) and its once-per-session routine-command gate are left off: too much friction
@@ -54,7 +57,7 @@ scripts/sync-upstream take <path>     # take upstream's version (refuses over lo
 scripts/sync-upstream add <path>...   # import more files from ECC
 ```
 
-Imported files keep their upstream paths so their `require()`s resolve unchanged.
+Imported files keep their upstream paths (`agents/`, `commands/`, `skills/`, `scripts/`) so their `require()`s resolve unchanged.
 
 ## Test
 

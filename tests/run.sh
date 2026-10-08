@@ -43,5 +43,30 @@ out=$(jq -cn '{session_id: "c1", hook_event_name: "PreToolUse", tool_name: "Edit
   | "$ROOT/bin/node-run" "$ROOT/scripts/hooks/suggest-compact.js" 2>&1; echo "exit=$?")
 check "suggest-compact runs cleanly"          yes   "$([[ $out == *exit=0 ]] && echo yes || echo no)"
 
+edit_input() { jq -cn --arg f "$1" --arg o "$2" --arg n "$3" \
+  '{hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: {file_path: $f, old_string: $o, new_string: $n}}'; }
+supp() { decision "$(edit_input "$1" "$2" "$3" | python3 -I "$ROOT/hooks/suppression-guard.py")"; }
+check "suppress: new noqa asks"               ask   "$(supp app.py 'x = f()' 'x = f()  # noqa: E501')"
+check "suppress: new type: ignore asks"       ask   "$(supp app.py 'y = g()' 'y = g()  # type: ignore[arg-type]')"
+check "suppress: new go nolint asks"          ask   "$(supp main.go 'err := run()' 'err := run() //nolint:errcheck')"
+check "suppress: new dart ignore asks"        ask   "$(supp w.dart 'final a = 1;' '// ignore: unused_local_variable
+final a = 1;')"
+check "suppress: moving a noqa passes"        allow "$(supp app.py 'a = 1  # noqa' 'b = 2  # noqa')"
+check "suppress: removing a noqa passes"      allow "$(supp app.py 'a = 1  # noqa' 'a = 1')"
+check "suppress: plain code edit passes"      allow "$(supp app.py 'return a' 'return a + b')"
+check "config: new ruff ignore asks"          ask   "$(supp pyproject.toml '[tool.ruff.lint]' '[tool.ruff.lint]
+ignore = ["E501"]')"
+check "config: dropping select asks"          ask   "$(supp pyproject.toml 'extend-select = ["B", "UP"]' '')"
+check "config: golangci disable asks"         ask   "$(supp .golangci.yml 'linters:' 'linters:
+  disable:
+    - errcheck')"
+check "config: dependency bump passes"        allow "$(supp pyproject.toml '"httpx>=0.27"' '"httpx>=0.28"')"
+check "config: requires-python bump passes"   allow "$(supp pyproject.toml 'requires-python = ">=3.12"' 'requires-python = ">=3.13"')"
+check "config: 'ignore' outside configs passes" allow "$(supp notes.md 'a' 'ignore this')"
+T=$(mktemp); printf 'x = 1  # noqa\n' > "$T"
+w=$(jq -cn --arg f "$T" '{tool_name: "Write", tool_input: {file_path: $f, content: "x = 1  # noqa\ny = 2  # noqa\n"}}' | python3 -I "$ROOT/hooks/suppression-guard.py")
+check "write: adding a second noqa asks"      ask   "$(decision "$w")"
+rm -f "$T"
+
 rm -rf "$HOME_STATE"
 exit $fail
