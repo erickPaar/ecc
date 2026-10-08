@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run a script with a Node new enough for the imported ECC code (18+).
+# Order: $ECC_NODE, node on PATH, ~/.local/share/node22, newest nvm node.
+# Without one, warn and exit 0: a missing runtime must not block every tool call.
+
+major() { "$1" -e 'process.stdout.write(process.versions.node.split(".")[0])' 2>/dev/null; }
+
+for n in "${ECC_NODE:-}" "$(command -v node)" "$HOME/.local/share/node22/bin/node" \
+         $(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -rV); do
+  [[ -n "$n" && -x "$n" ]] || continue
+  if (( $(major "$n" || echo 0) >= 18 )); then
+    exec "$n" "$@"
+  fi
+done
+
+echo "[ecc] no Node 18+ found; skipping $(basename "${1:-hook}")" >&2
+exit 0

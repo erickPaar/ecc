@@ -1,0 +1,15 @@
+{
+  "name": "erick",
+  "owner": {
+    "name": "Erick Santana"
+  },
+  "plugins": [
+    {
+      "name": "ecc",
+      "source": "./",
+      "description": "GateGuard and a prod guard before destructive commands, a verification loop, strategic compaction and session save/resume",
+      "version": "0.1.0"
+    }
+  ],
+  "description": "Erick's Claude Code plugins"
+}

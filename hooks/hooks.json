@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/prod-guard.sh\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "GATEGUARD_BASH_ROUTINE_DISABLED=1 GATEGUARD_STATE_DIR=\"$HOME/.claude/gateguard\" \"${CLAUDE_PLUGIN_ROOT}/bin/node-run\" \"${CLAUDE_PLUGIN_ROOT}/bin/run-hook.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/gateguard-fact-force.js\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/node-run\" \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/suggest-compact.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

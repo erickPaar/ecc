@@ -1,0 +1,4 @@
+The files listed in upstream.lock are imported from ECC
+(https://github.com/affaan-m/ECC), Copyright (c) 2026 Affaan Mustafa,
+under the MIT License; see LICENSE.ecc. They are kept unmodified unless
+upstream.lock's checksum says otherwise. Everything else is under LICENSE.

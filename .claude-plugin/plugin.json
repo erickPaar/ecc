@@ -1,0 +1,10 @@
+{
+  "name": "ecc",
+  "description": "Claude Code-only ECC: GateGuard and a prod guard before destructive commands, a verification loop, strategic compaction and session save/resume. Built from selected pieces of ECC.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Erick Santana"
+  },
+  "homepage": "https://github.com/erickPaar/ecc",
+  "license": "MIT"
+}

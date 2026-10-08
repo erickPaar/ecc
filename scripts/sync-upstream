@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Track the files imported from ECC (affaan-m/ECC) against upstream.
+#
+#   scripts/sync-upstream                 status of every file in upstream.lock
+#   scripts/sync-upstream diff <path>     upstream changes since the import
+#   scripts/sync-upstream take <path>     replace the local file with upstream's
+#                                         (refuses if you changed it; --force to override)
+#   scripts/sync-upstream add <path>...   import more files from upstream
+#
+# upstream.lock keeps, per file, the upstream commit it came from and its sha256
+# at import, so local edits and upstream edits can be told apart.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+LOCK="$ROOT/upstream.lock"
+REPO_URL="https://github.com/affaan-m/ECC.git"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ecc-upstream"
+
+fetch() {
+  if [[ -d "$CACHE/.git" ]]; then
+    git -C "$CACHE" fetch -q origin
+    git -C "$CACHE" reset -q --hard origin/HEAD
+  else
+    mkdir -p "$(dirname "$CACHE")"
+    git clone -q --filter=blob:none "$REPO_URL" "$CACHE"
+  fi
+  HEAD_COMMIT=$(git -C "$CACHE" rev-parse HEAD)
+}
+
+lock_entry() { awk -v p="$1" '$1 == p { print $2, $3 }' "$LOCK"; }
+
+set_lock() { # path commit sha
+  local tmp; tmp=$(mktemp)
+  awk -v p="$1" '$1 != p' "$LOCK" > "$tmp"
+  echo "$1 $2 $3" >> "$tmp"
+  { grep '^#' "$tmp"; grep -v '^#' "$tmp" | sort; } > "$LOCK"
+  rm -f "$tmp"
+}
+
+local_sha() { sha256sum "$ROOT/$1" | cut -c1-64; }
+
+status() {
+  fetch
+  printf '%-48s %s\n' "FILE" "STATE (upstream now ${HEAD_COMMIT:0:7})"
+  grep -v '^#' "$LOCK" | while read -r path commit sha; do
+    local mine=no theirs=no state
+    [[ -f "$ROOT/$path" && "$(local_sha "$path")" == "$sha" ]] || mine=yes
+    if ! git -C "$CACHE" cat-file -e "HEAD:$path" 2>/dev/null; then
+      state="removed or moved upstream"
+    else
+      git -C "$CACHE" diff --quiet "$commit" HEAD -- "$path" || theirs=yes
+      case "$mine/$theirs" in
+        no/no)   state="up to date" ;;
+        no/yes)  state="upstream changed  -> diff / take" ;;
+        yes/no)  state="changed locally" ;;
+        yes/yes) state="changed on both sides -> diff, merge by hand" ;;
+      esac
+    fi
+    printf '%-48s %s\n' "$path" "$state"
+  done
+}
+
+diff_one() {
+  read -r commit _ <<<"$(lock_entry "$1")"
+  [[ -n "${commit:-}" ]] || { echo "not in upstream.lock: $1" >&2; exit 1; }
+  fetch
+  git -C "$CACHE" diff "$commit" HEAD -- "$1"
+}
+
+take() {
+  local force=no path
+  [[ "${1:-}" == "--force" ]] && { force=yes; shift; }
+  path=${1:?usage: take [--force] <path>}
+  read -r _ sha <<<"$(lock_entry "$path")"
+  [[ -n "${sha:-}" ]] || { echo "not in upstream.lock: $path" >&2; exit 1; }
+  if [[ "$force" == no && "$(local_sha "$path")" != "$sha" ]]; then
+    echo "$path has local changes; review 'diff' and merge by hand, or rerun with --force" >&2
+    exit 1
+  fi
+  fetch
+  git -C "$CACHE" show "HEAD:$path" > "$ROOT/$path"
+  set_lock "$path" "$HEAD_COMMIT" "$(local_sha "$path")"
+  echo "took $path at ${HEAD_COMMIT:0:7}"
+}
+
+add() {
+  (( $# )) || { echo "usage: add <path>..." >&2; exit 1; }
+  fetch
+  for path in "$@"; do
+    git -C "$CACHE" cat-file -e "HEAD:$path" 2>/dev/null || { echo "not upstream: $path" >&2; exit 1; }
+    mkdir -p "$ROOT/$(dirname "$path")"
+    git -C "$CACHE" show "HEAD:$path" > "$ROOT/$path"
+    set_lock "$path" "$HEAD_COMMIT" "$(local_sha "$path")"
+    echo "added $path"
+  done
+}
+
+case "${1:-status}" in
+  status) status ;;
+  diff)   shift; diff_one "${1:?usage: diff <path>}" ;;
+  take)   shift; take "$@" ;;
+  add)    shift; add "$@" ;;
+  *)      sed -n '2,11p' "$0"; exit 1 ;;
+esac
