@@ -1,7 +1,7 @@
 {
   "name": "ecc",
   "description": "Claude Code-only ECC: guards before destructive commands and check suppressions, verification loop, learning, Flutter tooling, strategic compaction and session save/resume.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "Erick Santana"
   },

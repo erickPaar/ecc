@@ -15,6 +15,8 @@ parts that earn their place.
 | save / resume session | `/ecc:save-session` writes where you left off; `/ecc:resume-session` picks it up | ECC |
 | learn-eval | `/ecc:learn-eval` after solving something non-trivial: extracts the reusable lesson, checks it's worth keeping, saves it as a global or project skill with your approval | ECC |
 | silent-failure-hunter | agent that reviews for swallowed errors, bad fallbacks and lost error propagation (Python `except`, Go `_ = err`) | ECC |
+| fix-defect | skill: reproduce the bug as a failing regression test, root cause, smallest fix, verify with the repo's own checks, review with the repo's own standards, commit after you confirm. The idea of ECC's `orch-fix-defect`, without its pipeline of ECC agents | own |
+| santa-method | skill: two independent reviewers with the same rubric must both pass before something ships; for high-stakes changes | ECC |
 | Flutter | `flutter-reviewer` and `dart-build-resolver` agents, `/ecc:flutter-review`, `/ecc:flutter-build`, `/ecc:flutter-test`, the `dart-flutter-patterns` skill and an `accessibility` (WCAG 2.2, iOS/Android) skill | ECC |
 
 GateGuard runs on Bash only. Its edit gate (facts before the first edit of each
