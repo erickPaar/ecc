@@ -68,5 +68,59 @@ w=$(jq -cn --arg f "$T" '{tool_name: "Write", tool_input: {file_path: $f, conten
 check "write: adding a second noqa asks"      ask   "$(decision "$w")"
 rm -f "$T"
 
+# A throwaway repository with a bare remote, for the worktree guard and the worktree skill.
+WT=$(mktemp -d); export GIT_CONFIG_GLOBAL=$WT/gitconfig
+git config --global user.email t@example.com; git config --global user.name t; git config --global init.defaultBranch main
+git init -q --bare "$WT/origin.git"; git clone -q "$WT/origin.git" "$WT/repo" 2>/dev/null
+R=$WT/repo; printf '.env\n__pycache__/\n' > "$R/.gitignore"; echo a > "$R/a.txt"
+git -C "$R" add . && git -C "$R" commit -qm init && git -C "$R" push -q origin main
+git -C "$R" remote set-head origin -a >/dev/null
+
+wg_input() { jq -cn --arg c "$1" --arg d "$2" '{hook_event_name: "PreToolUse", tool_name: "Bash", cwd: $d, tool_input: {command: $c}}'; }
+wg() { decision "$(wg_input "$1" "${2:-$R}" | "$ROOT/hooks/worktree-guard.sh")"; }
+git -C "$R" worktree add -q -b w1 "$R/.claude/worktrees/w1"; W1=$R/.claude/worktrees/w1
+check "wguard: remove of a clean worktree passes"  allow "$(wg 'git worktree remove .claude/worktrees/w1')"
+mkdir -p "$W1/__pycache__"; touch "$W1/__pycache__/x.pyc"
+check "wguard: caches alone don't ask"             allow "$(wg 'git worktree remove .claude/worktrees/w1')"
+echo S=1 > "$W1/.env"
+check "wguard: remove with an ignored .env asks"   ask   "$(wg "git worktree remove --force $W1")"
+rm "$W1/.env"; echo b >> "$W1/a.txt"
+check "wguard: remove with changes asks"           ask   "$(wg 'git worktree remove .claude/worktrees/w1')"
+check "wguard: reset --hard with changes asks"     ask   "$(wg "cd $W1 && git reset --hard origin/main")"
+check "wguard: checkout -- . with changes asks"    ask   "$(wg 'git checkout -- .' "$W1")"
+check "wguard: restore with changes asks"          ask   "$(wg "git -C $W1 restore a.txt")"
+check "wguard: restore --staged passes"            allow "$(wg "git -C $W1 restore --staged a.txt")"
+git -C "$W1" checkout -q -- a.txt
+check "wguard: reset --hard when clean passes"     allow "$(wg 'git reset --hard origin/main' "$W1")"
+git -C "$W1" commit -q --allow-empty -m local
+check "wguard: reset --hard over a local commit asks" ask "$(wg 'git reset --hard origin/main' "$W1")"
+git -C "$W1" reset -q --hard origin/main; echo S=1 > "$W1/.env"
+check "wguard: clean -fdx with a .env asks"        ask   "$(wg 'git clean -fdx' "$W1")"
+check "wguard: clean -fd ignores ignored files"    allow "$(wg 'git clean -fd' "$W1")"
+check "wguard: clean -n passes"                    allow "$(wg 'git clean -ndx' "$W1")"
+check "wguard: other git commands pass"            allow "$(wg 'git status && git log -1' "$W1")"
+reason=$(wg_input 'git worktree remove .claude/worktrees/w1' "$R" | "$ROOT/hooks/worktree-guard.sh" | jq -r .hookSpecificOutput.permissionDecisionReason)
+check "wguard: reason names the file"              yes   "$([[ $reason == *.env* ]] && echo yes || echo no)"
+rm "$W1/.env"; git -C "$R" worktree remove "$W1"; git -C "$R" branch -qD w1
+
+wt() { (cd "$R" && "$ROOT/skills/worktree/scripts/wt.sh" "$@") >"$WT/out" 2>&1; echo $?; }
+check "wt: add makes the worktree"                 0     "$(wt add w2)"
+check "wt: add puts it under .claude/worktrees"    yes   "$([[ -d $R/.claude/worktrees/w2 ]] && echo yes || echo no)"
+check "wt: git status doesn't show it"             0     "$(git -C "$R" status --porcelain | wc -l | tr -d ' ')"
+check "wt: add refuses an existing name"           1     "$(wt add w2)"
+W2=$R/.claude/worktrees/w2; echo c >> "$W2/a.txt"
+check "wt: rm refuses changes"                     1     "$(wt rm w2)"
+git -C "$W2" checkout -q -- a.txt; git -C "$W2" commit -q --allow-empty -m local
+check "wt: rm refuses a commit on no remote"       1     "$(wt rm w2)"
+git -C "$W2" reset -q --hard origin/main; echo S=1 > "$W2/.env"; mkdir -p "$W2/__pycache__"; touch "$W2/__pycache__/y.pyc"
+check "wt: rm removes a clean worktree"            0     "$(wt rm w2)"
+kept=$(find "$R/.claude/worktrees/.removed" -name .env | head -1)
+check "wt: rm keeps the ignored .env"              yes   "$([[ -n $kept && $(cat "$kept") == S=1 ]] && echo yes || echo no)"
+check "wt: rm skips caches"                        0     "$(find "$R/.claude/worktrees/.removed" -name '*.pyc' | wc -l | tr -d ' ')"
+check "wt: rm deletes the local branch"            no    "$(git -C "$R" show-ref -q --verify refs/heads/w2 && echo yes || echo no)"
+check "wt: rm refuses the main checkout"           1     "$(wt rm "$R")"
+check "wt: list runs"                              0     "$(wt list)"
+unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
+
 rm -rf "$HOME_STATE"
 exit $fail
