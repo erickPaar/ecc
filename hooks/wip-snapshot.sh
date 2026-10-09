@@ -11,7 +11,7 @@
 # `--no-index` diff below follows the user's diff settings (color, prefixes, external tools,
 # textconv). A run cut short by the SessionEnd budget leaves at most a stray .tmp, which the next
 # save cleans up. It covers only worktrees under .claude/worktrees/, never a main checkout or a
-# submodule; a path outside the worktree (a symlink's target) is skipped. Edits made through Bash
+# submodule; a file reached through a folder linked outside the worktree is skipped. Edits made through Bash
 # are not tracked. ECC_WIP_SNAPSHOT=0 turns it off. Any failure passes silently.
 
 [[ ${ECC_WIP_SNAPSHOT:-1} == 0 ]] && exit 0
@@ -38,8 +38,9 @@ case ${1:-} in
     [[ -n $file ]] || exit 0
     top=$(skill_worktree "$file") || exit 0
     # The path as the session named it, relative to the worktree, without resolving symlinks.
+    # skill_worktree already resolved the file's folder to this worktree (a folder linked outside
+    # resolves to another repository, or none, and stops there), so $dir is under $top.
     dir=$(cd "$(dirname "$file")" 2>/dev/null && pwd -P) || exit 0
-    case $dir/ in "$top"/*) ;; *) exit 0 ;; esac
     rel=${dir#"$top"}; rel=${rel#/}; rel=${rel:+$rel/}$(basename "$file")
     mkdir -p "$state_dir" 2>/dev/null || exit 0
     find "$state_dir" -type f -mtime +7 -delete 2>/dev/null # sessions killed before their SessionEnd
@@ -69,7 +70,7 @@ case ${1:-} in
       if [[ -s $patch.tmp ]]; then
         mv -f "$patch.tmp" "$patch"
         log="$(dirname "$top")/$name.md"
-        [[ -f $log ]] && printf -- '- %s: session ended with uncommitted changes; saved in .wip/%s (restore: git -C %s apply --reject %s)\n' \
+        [[ -f $log ]] && printf -- '- %s: session ended with uncommitted changes; saved in .wip/%s (restore: git -C %q apply --reject %q)\n' \
           "$(date '+%Y-%m-%d %H:%M')" "$(basename "$patch")" "$top" "$patch" >>"$log"
       else
         rm -f "$patch.tmp"

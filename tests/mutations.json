@@ -333,13 +333,6 @@
     "replace": "\\\n           "
   },
   {
-    "label": "snapshot: a path outside the worktree is skipped",
-    "file": "hooks/wip-snapshot.sh",
-    "find": "case $dir/ in \"$top\"/*) ;; *) exit 0 ;; esac",
-    "replace": ":",
-    "redundant": "without it the outside path becomes a relative path that matches nothing in the worktree, and diff-index and ls-files ignore a path that matches nothing; the test with a folder linked outside covers the outcome"
-  },
-  {
     "label": "snapshot: a tab in a name is kept",
     "file": "hooks/wip-snapshot.sh",
     "find": "SEP=$'\\x1f'",
@@ -354,7 +347,7 @@
   {
     "label": "snapshot: restore from the worktree's root, with --reject",
     "file": "hooks/wip-snapshot.sh",
-    "find": "(restore: git -C %s apply --reject %s)",
+    "find": "(restore: git -C %q apply --reject %q)",
     "replace": "(restore: git apply %s)%s"
   },
   {
