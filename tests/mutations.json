@@ -259,5 +259,59 @@
     "find": "t=${t//'{{owner}}'/\"$owner\"}",
     "replace": "t=${t//'{{owner}}'/$owner}",
     "needs_bash": "5.2"
+  },
+  {
+    "label": "snapshot: never a main checkout or submodule",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "[[ $gitdir == \"$common\" ]] && return 1 # a main checkout",
+    "replace": ": # a main checkout"
+  },
+  {
+    "label": "snapshot: only under .claude/worktrees",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "[[ $top == \"$(dirname \"$common\")/.claude/worktrees/\"* ]] || return 1",
+    "replace": ":"
+  },
+  {
+    "label": "snapshot: only this session's files",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "GIT_LITERAL_PATHSPECS=1 git -C \"$top\" diff --binary HEAD -- \"${files[@]}\"",
+    "replace": "git -C \"$top\" diff --binary HEAD"
+  },
+  {
+    "label": "snapshot: includes files the session created",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "(cd \"$top\" && git diff --binary --no-index /dev/null \"$f\" 2>/dev/null)",
+    "replace": ":"
+  },
+  {
+    "label": "snapshot: no patch when nothing changed",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "if [[ -s $patch.tmp ]]; then",
+    "replace": "if true; then"
+  },
+  {
+    "label": "snapshot: notes it in the worklog",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "[[ -f $log ]] && printf -- '- %s: session ended",
+    "replace": "false && printf -- '- %s: session ended"
+  },
+  {
+    "label": "snapshot: opt-out",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "[[ ${ECC_WIP_SNAPSHOT:-1} == 0 ]] && exit 0",
+    "replace": ":"
+  },
+  {
+    "label": "snapshot: state cleared after saving",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "    rm -f \"$state\"\n    ;;\nesac",
+    "replace": "    :\n    ;;\nesac"
+  },
+  {
+    "label": "snapshot: binary-safe diff",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "diff --binary HEAD",
+    "replace": "diff HEAD"
   }
 ]

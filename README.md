@@ -1,7 +1,7 @@
 # ecc
 
 A Claude Code-only cut of [ECC](https://github.com/affaan-m/ECC): the pieces worth
-having, plus three guards and a skill of its own. ECC's full install brings 361 skills and agents
+having, plus three guards, a skill and a snapshot hook of its own. ECC's full install brings 361 skills and agents
 (about 26k tokens of descriptions in every session) and 24 hooks; this keeps the
 parts that earn their place.
 
@@ -11,6 +11,7 @@ parts that earn their place.
 | suppression guard | an edit that adds `# noqa`, `# type: ignore`, `# pyrefly: ignore`, `//nolint`, Dart `// ignore:`, `# tflint-ignore` and the like, or loosens a ruff/pyrefly/import-linter/golangci/`analysis_options`/tflint config, asks you first; moving or removing suppressions never does | own |
 | worktree guard | a `git worktree remove`, `git reset --hard`, `git checkout -- <path>`, `git restore` or `git clean -f` that would throw away local work asks you first and names it: uncommitted changes, commits on no remote, and the ignored files (`.env`, local data) that `worktree remove` deletes too; caches don't count, and with nothing to lose the command passes. Stashes are out of scope: `git stash drop` and `clear` pass | own |
 | worktree | skill and script: worktrees inside each repository at `.claude/worktrees/<name>`, kept out of git through `.git/info/exclude`; `add` refuses a name or branch that exists, `rm` refuses changes, commits on no remote and a worktree something runs from, and copies ignored files out before removing; `list` shows branch, size, changes, pull request and the worklog's status and next; each worktree gets a worklog beside it (plan, verification, invariants, surprises, status), never committed; `rm` recognises a squash-merged branch | own |
+| wip snapshot | when a session ends with uncommitted changes to files it edited in a worktree, saves them as a patch in `.claude/worktrees/.wip/` and notes it in the worklog; `git apply` brings them back. It only reads git: no index, commit, ref or hook | own |
 | GateGuard | before a destructive shell command (`rm -rf`, force push to main, `DROP TABLE`…) Claude must list what it touches, a rollback step and your instruction, then retry | ECC |
 | strategic compact | suggests `/compact` at natural breakpoints instead of letting auto-compaction hit mid-task | ECC |
 | verification loop | skill: build, types, lint, tests and a diff review before calling work done | ECC |
@@ -46,6 +47,7 @@ the hook with a warning rather than blocking every call.
 | `ECC_SAFE_PROFILES` | comma-separated AWS profiles the prod guard lets through without asking, e.g. `dev` |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | extra regex GateGuard treats as destructive |
 | `GATEGUARD_DISABLED=1` | turn GateGuard off |
+| `ECC_WIP_SNAPSHOT=0` | turn the end-of-session snapshot off |
 | `WT_CACHE_RE` | extra regex of ignored paths that the worktree guard and `wt.sh rm` treat as caches, safe to lose |
 | `WT_OWNER` | the owner `wt.sh add` writes in a new worklog (default: `git config user.name`); a session can set its own name |
 | `WT_ROOTS` | colon-separated folders whose repositories `wt.sh list` shows when run outside a repository |

@@ -231,6 +231,42 @@ check "merged: gh into another base is not enough" 1     "$(gwt "[{\"headRefOid\
 check "merged: gh at this head into main is"       0     "$(gwt "[{\"headRefOid\": \"$H5\", \"baseRefName\": \"main\"}]")"
 git -C "$R" remote set-url origin "$WT/origin.git"
 
+# The snapshot of a session's unfinished work, saved when it ends.
+snap() { jq -cn --arg s "$1" --arg f "${3:-}" '{session_id: $s, tool_input: {file_path: $f}}' \
+  | ECC_WIP_STATE_DIR=$WT/snap "$ROOT/hooks/wip-snapshot.sh" "$2"; }
+wt add s1 >/dev/null; S1=$R/.claude/worktrees/s1; WIP=$R/.claude/worktrees/.wip
+echo staged >> "$S1/a.txt"; git -C "$S1" add a.txt; echo unstaged >> "$S1/a.txt"; echo created > "$S1/new file.txt"
+echo theirs >> "$S1/.gitignore"
+snap sa track "$S1/a.txt"; snap sa track "$S1/new file.txt"
+before=$(git -C "$S1" rev-parse HEAD; git -C "$S1" status --porcelain; md5sum "$(git -C "$S1" rev-parse --absolute-git-dir)/index")
+snap sa save; P=$(ls "$WIP"/s1-*.patch 2>/dev/null | head -1)
+check "snapshot: saves a patch in .wip"            yes   "$([[ -s $P ]] && echo yes || echo no)"
+check "snapshot: git is left exactly as it was"    yes   "$([[ $before == "$(git -C "$S1" rev-parse HEAD; git -C "$S1" status --porcelain; md5sum "$(git -C "$S1" rev-parse --absolute-git-dir)/index")" ]] && echo yes || echo no)"
+check "snapshot: only this session's files"        no    "$(grep -q gitignore "$P" && echo yes || echo no)"
+check "snapshot: the worklog says where it is"     yes   "$(grep -q 'git apply' "$R/.claude/worktrees/s1.md" && echo yes || echo no)"
+check "snapshot: the session's state is cleared"   no    "$([[ -e $WT/snap/sa ]] && echo yes || echo no)"
+git -C "$S1" checkout -q -- .gitignore; git -C "$S1" reset -q --hard origin/main; rm -f "$S1/new file.txt"
+check "snapshot: git apply brings the work back"   yes   "$(git -C "$S1" apply "$P" 2>/dev/null && grep -q unstaged "$S1/a.txt" && grep -q created "$S1/new file.txt" && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$S1/new file.txt"
+snap sb track "$S1/a.txt"; snap sb save
+check "snapshot: no changes, no patch"             1     "$(ls "$WIP"/s1-*.patch | wc -l | tr -d ' ')"
+echo m >> "$R/a.txt"; snap sc track "$R/a.txt"
+check "snapshot: never tracks the main checkout"   no    "$([[ -s $WT/snap/sc ]] && echo yes || echo no)"
+git -C "$R" checkout -q -- a.txt
+git -C "$R" worktree add -q -b s2 "$WT/outside"; echo o >> "$WT/outside/a.txt"; snap sd track "$WT/outside/a.txt"
+check "snapshot: never tracks a worktree outside .claude/worktrees" no "$([[ -s $WT/snap/sd ]] && echo yes || echo no)"
+git init -q --separate-git-dir "$R/.fake.git" "$R/.claude/worktrees/fake"; echo f > "$R/.claude/worktrees/fake/f"; snap sg track "$R/.claude/worktrees/fake/f"
+check "snapshot: a main checkout inside .claude/worktrees is not tracked" no "$([[ -s $WT/snap/sg ]] && echo yes || echo no)"
+rm -rf "$R/.claude/worktrees/fake" "$R/.fake.git"
+printf '\x00\x01\x02' > "$S1/bin.dat"; git -C "$S1" add bin.dat; git -C "$S1" commit -qm bin; printf '\x00\x09\x02\x03' > "$S1/bin.dat"
+snap sh track "$S1/bin.dat"; snap sh save; PB=$(ls -t "$WIP"/s1-*.patch | head -1); git -C "$S1" checkout -q -- bin.dat
+check "snapshot: a binary file comes back"         yes   "$(git -C "$S1" apply "$PB" 2>/dev/null && [[ $(od -An -tx1 "$S1/bin.dat" | tr -d ' ') == 00090203 ]] && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$PB"
+echo e >> "$S1/a.txt"; snap se track "$S1/a.txt"; ECC_WIP_SNAPSHOT=0 snap se save
+check "snapshot: ECC_WIP_SNAPSHOT=0 turns it off"  1     "$(ls "$WIP"/s1-*.patch | wc -l | tr -d ' ')"
+snap sf save
+check "snapshot: another session's end saves nothing" 1  "$(ls "$WIP"/s1-*.patch | wc -l | tr -d ' ')"
+
 unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
 
 rm -rf "$HOME_STATE"
