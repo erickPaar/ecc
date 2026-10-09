@@ -10,7 +10,7 @@ parts that earn their place.
 | prod guard | `tofu`/`terraform`/`terragrunt` apply, destroy, import and state edits, and AWS `delete-*`/`terminate-*`/`s3 rm` calls always ask you, even in auto mode, naming the AWS profile in use | own |
 | suppression guard | an edit that adds `# noqa`, `# type: ignore`, `# pyrefly: ignore`, `//nolint`, Dart `// ignore:`, `# tflint-ignore` and the like, or loosens a ruff/pyrefly/import-linter/golangci/`analysis_options`/tflint config, asks you first; moving or removing suppressions never does | own |
 | worktree guard | a `git worktree remove`, `git reset --hard`, `git checkout -- <path>`, `git restore` or `git clean -f` that would throw away local work asks you first and names it: uncommitted changes, commits on no remote, and the ignored files (`.env`, local data) that `worktree remove` deletes too; caches don't count, and with nothing to lose the command passes. Stashes are out of scope: `git stash drop` and `clear` pass | own |
-| worktree | skill and script: worktrees inside each repository at `.claude/worktrees/<name>`, kept out of git through `.git/info/exclude`; `add` refuses a name or branch that exists, `rm` refuses changes, commits on no remote and a worktree something runs from, and copies ignored files out before removing; `list` shows branch, size, changes and pull request | own |
+| worktree | skill and script: worktrees inside each repository at `.claude/worktrees/<name>`, kept out of git through `.git/info/exclude`; `add` refuses a name or branch that exists, `rm` refuses changes, commits on no remote and a worktree something runs from, and copies ignored files out before removing; `list` shows branch, size, changes, pull request and the worklog's status and next; each worktree gets a worklog beside it (plan, verification, invariants, surprises, status), never committed; `rm` recognises a squash-merged branch | own |
 | GateGuard | before a destructive shell command (`rm -rf`, force push to main, `DROP TABLE`…) Claude must list what it touches, a rollback step and your instruction, then retry | ECC |
 | strategic compact | suggests `/compact` at natural breakpoints instead of letting auto-compaction hit mid-task | ECC |
 | verification loop | skill: build, types, lint, tests and a diff review before calling work done | ECC |
@@ -47,6 +47,7 @@ the hook with a warning rather than blocking every call.
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | extra regex GateGuard treats as destructive |
 | `GATEGUARD_DISABLED=1` | turn GateGuard off |
 | `WT_CACHE_RE` | extra regex of ignored paths that the worktree guard and `wt.sh rm` treat as caches, safe to lose |
+| `WT_OWNER` | the owner `wt.sh add` writes in a new worklog (default: `git config user.name`); a session can set its own name |
 | `WT_ROOTS` | colon-separated folders whose repositories `wt.sh list` shows when run outside a repository |
 
 Set them in `~/.claude/settings.json` under `env`, or per repository in `.claude/settings.json`.
@@ -68,5 +69,6 @@ Imported files keep their upstream paths (`agents/`, `commands/`, `skills/`, `sc
 ## Test
 
 ```
-tests/run.sh
+tests/run.sh       # every hook and script case
+tests/mutate.sh    # break each guard in tests/mutations.json once; prints which a test catches
 ```

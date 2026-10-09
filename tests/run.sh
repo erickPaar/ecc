@@ -101,7 +101,10 @@ check "wguard: clean -n passes"                    allow "$(wg 'git clean -ndx' 
 check "wguard: other git commands pass"            allow "$(wg 'git status && git log -1' "$W1")"
 reason=$(wg_input 'git worktree remove .claude/worktrees/w1' "$R" | "$ROOT/hooks/worktree-guard.sh" | jq -r .hookSpecificOutput.permissionDecisionReason)
 check "wguard: reason names the file"              yes   "$([[ $reason == *.env* ]] && echo yes || echo no)"
-rm "$W1/.env"; echo b >> "$W1/a.txt"
+rm "$W1/.env"; git -C "$W1" commit -q --allow-empty -m local-only
+check "wguard: remove with a commit on no remote asks" ask "$(wg 'git worktree remove .claude/worktrees/w1')"
+git -C "$W1" reset -q --hard origin/main; echo b >> "$W1/a.txt"
+check "wguard: reset without --hard passes"        allow "$(wg 'git reset HEAD a.txt' "$W1")"
 check "wguard: (cd w && reset --hard) asks"        ask   "$(wg "(cd $W1 && git reset --hard)")"
 check "wguard: pushd then reset --hard asks"       ask   "$(wg "pushd $W1 && git reset --hard")"
 check "wguard: /usr/bin/git reset --hard asks"     ask   "$(wg "/usr/bin/git -C $W1 reset --hard")"
@@ -140,6 +143,9 @@ check "wt: add makes the worktree"                 0     "$(wt add w2)"
 check "wt: add puts it under .claude/worktrees"    yes   "$([[ -d $R/.claude/worktrees/w2 ]] && echo yes || echo no)"
 check "wt: git status doesn't show it"             0     "$(git -C "$R" status --porcelain | wc -l | tr -d ' ')"
 check "wt: add refuses an existing name"           1     "$(wt add w2)"
+git -C "$R" branch taken
+check "wt: add refuses an existing branch"         1     "$(wt add other taken)"
+git -C "$R" branch -qD taken
 W2=$R/.claude/worktrees/w2; echo c >> "$W2/a.txt"
 check "wt: rm refuses changes"                     1     "$(wt rm w2)"
 git -C "$W2" checkout -q -- a.txt; git -C "$W2" commit -q --allow-empty -m local
@@ -154,6 +160,7 @@ check "wt: rm refuses the main checkout"           1     "$(wt rm "$R")"
 check "wt: list runs"                              0     "$(wt list)"
 wt add w4 >/dev/null; wt add w5 >/dev/null; rm -rf "$R/.claude/worktrees/w4"
 check "wt: list goes on past a deleted worktree"   yes   "$(wt list >/dev/null; grep -q w5 "$WT/out" && echo yes || echo no)"
+check "wt: list says the folder is gone"           yes   "$(grep -q 'folder gone' "$WT/out" && echo yes || echo no)"
 git -C "$R" worktree prune; git -C "$R" branch -qD w4
 W5=$R/.claude/worktrees/w5; echo x > "$W5/my file.log"; echo '*.log' >> "$R/.git/info/exclude"
 check "wt: rm keeps an ignored file with a space"  0     "$(wt rm w5)"
@@ -166,6 +173,64 @@ check "wt: rm by absolute path from outside"       0     "$(cd / && "$ROOT/skill
 NO=$WT/noorigin; git init -q "$NO"; git -C "$NO" commit -q --allow-empty -m i
 check "wt: list in a repo without origin"          0     "$( (cd "$NO" && "$ROOT/skills/worktree/scripts/wt.sh" list) >/dev/null 2>&1; echo $?)"
 check "wt: add without origin uses HEAD"           0     "$( (cd "$NO" && "$ROOT/skills/worktree/scripts/wt.sh" add n1) >/dev/null 2>&1; echo $?)"
+# The worklog beside each worktree.
+wt add w7 >/dev/null; L7=$R/.claude/worktrees/w7.md
+check "worklog: add writes it beside the worktree" yes   "$([[ -f $L7 ]] && grep -q '^- branch: w7' "$L7" && echo yes || echo no)"
+check "worklog: it is never committed"             0     "$(git -C "$R/.claude/worktrees/w7" status --porcelain | wc -l | tr -d ' ')"
+sed -i 's/^- status: started/- status: writing the parser/; s/^- next:$/- next: the tests/' "$L7"; printf -- '- status: an old line in the log\n' >> "$L7"
+check "worklog: list shows status and next"        yes   "$(wt list >/dev/null; grep -q 'status: writing the parser' "$WT/out" && grep -q 'next:   the tests' "$WT/out" && echo yes || echo no)"
+check "worklog: list ignores the log section"     no    "$(grep -q 'an old line in the log' "$WT/out" && echo yes || echo no)"
+check "worklog: rm keeps it in .removed"           yes   "$(wt rm w7 >/dev/null; [[ ! -e $L7 && -n $(find "$R/.claude/worktrees/.removed" -name worklog.md -path '*w7-*') ]] && echo yes || echo no)"
+
+# A squash merge gives the branch's commits new ids; rm sees the content is on main.
+wt add w8 >/dev/null; W8=$R/.claude/worktrees/w8
+echo squashed > "$W8/s.txt"; git -C "$W8" add s.txt; git -C "$W8" commit -qm one; echo more >> "$W8/s.txt"; git -C "$W8" commit -qam two
+check "wt: rm refuses commits whose content isn't on main" 1 "$(wt rm w8)"
+git -C "$R" checkout -q main; git -C "$R" merge -q --squash w8 && git -C "$R" commit -qm "squash w8" && git -C "$R" push -q origin main
+check "wt: rm accepts a squash-merged branch"      0     "$(wt rm w8)"
+
+# wt.sh: special characters in the worklog, a symlinked script, renames.
+check "worklog: an owner with | & and \\ is written as is" yes "$(WT_OWNER='A | B & C\new' wt add w13 >/dev/null; grep -qF -- '- owner: A | B & C\new' "$R/.claude/worktrees/w13.md" && echo yes || echo no)"
+ln -s "$ROOT/skills/worktree/scripts/wt.sh" "$WT/wtlink"
+check "worklog: written through a symlinked script" yes "$( (cd "$R" && "$WT/wtlink" add w14) >/dev/null 2>&1; [[ -s $R/.claude/worktrees/w14.md ]] && echo yes || echo no)"
+W13=$R/.claude/worktrees/w13; git -C "$W13" mv a.txt moved.txt; git -C "$W13" commit -qm mv
+git -C "$R" checkout -q main; cp "$R/a.txt" "$R/moved.txt"; git -C "$R" add moved.txt; git -C "$R" commit -qm "moved.txt, a.txt kept"; git -C "$R" push -q origin main
+check "wt: rm refuses a rename whose old file is still on main" 1 "$(wt rm w13)"
+
+# Guards the mutation table asked tests for.
+check "wt: add refuses a name with a slash"        1     "$(wt add x/foo)"
+wt add g1 >/dev/null; G1=$R/.claude/worktrees/g1; echo old > "$R/.claude/worktrees/g2.md"
+check "worklog: an old worklog is moved, not reused" yes "$(wt add g2 >/dev/null; ! grep -q old "$R/.claude/worktrees/g2.md" && ls "$R/.claude/worktrees/.removed/" | grep -q '^g2-stale-' && echo yes || echo no)"
+(cd "$G1" && exec sleep 30) & SLEEPER=$!; sleep 0.3
+check "wt: rm refuses a worktree a process runs in" 1    "$(wt rm g1)"
+kill $SLEEPER 2>/dev/null; wait $SLEEPER 2>/dev/null
+sed -i 's/^- status: started/- status: seen through a link/' "$R/.claude/worktrees/g1.md"; ln -s "$R" "$WT/rlink"
+linked=$( (cd / && WT_ROOTS="$WT/rlink" "$ROOT/skills/worktree/scripts/wt.sh" list) 2>/dev/null)
+check "worklog: list reads it through a symlinked repo path" yes "$(grep -q 'seen through a link' <<<"$linked" && echo yes || echo no)"
+git -C "$R" worktree add -q -b g3 "$WT/g3"; printf -- '- status: not this worktree\n' > "$WT/g3.md"
+check "worklog: list skips a worktree outside .claude/worktrees" no "$(wt list >/dev/null; grep -q 'not this worktree' "$WT/out" && echo yes || echo no)"
+git -C "$R" worktree remove "$WT/g3"; git -C "$R" branch -qD g3
+# A file named like a glob is compared literally.
+wt add g4 >/dev/null; G4=$R/.claude/worktrees/g4
+echo star > "$G4/x*"; git -C "$G4" add -- 'x*'; git -C "$G4" commit -qm star
+git -C "$R" checkout -q main; echo star > "$R/x*"; echo other > "$R/xa"; git -C "$R" add -- 'x*' xa; git -C "$R" commit -qm "x* and xa"; git -C "$R" push -q origin main
+check "merged: a file named x* is compared literally" 0  "$(wt rm g4)"
+# GitHub's answer: a stub gh prints the pull requests in GH_PRS through the query wt.sh passes.
+mkdir -p "$WT/bin"; cat > "$WT/bin/gh" <<'GH'
+#!/usr/bin/env bash
+q=""; while [[ $# -gt 0 ]]; do [[ $1 == -q ]] && { q=$2; shift; }; shift; done
+jq -r "$q" <<<"${GH_PRS:-[]}"
+GH
+chmod +x "$WT/bin/gh"; git -C "$R" remote set-url origin "https://github.com/someone/repo.git"
+gwt() { (cd "$R" && PATH="$WT/bin:$PATH" GH_PRS=$1 "$ROOT/skills/worktree/scripts/wt.sh" rm g5) >/dev/null 2>&1; echo $?; }
+git -C "$R" remote set-url origin "$WT/origin.git"; wt add g5 >/dev/null; G5=$R/.claude/worktrees/g5
+echo five > "$G5/five.txt"; git -C "$G5" add five.txt; git -C "$G5" commit -qm five; H5=$(git -C "$G5" rev-parse HEAD)
+git -C "$R" remote set-url origin "https://github.com/someone/repo.git"
+check "merged: gh at another head is not enough"   1     "$(gwt "[{\"headRefOid\": \"0000\", \"baseRefName\": \"main\"}]")"
+check "merged: gh into another base is not enough" 1     "$(gwt "[{\"headRefOid\": \"$H5\", \"baseRefName\": \"develop\"}]")"
+check "merged: gh at this head into main is"       0     "$(gwt "[{\"headRefOid\": \"$H5\", \"baseRefName\": \"main\"}]")"
+git -C "$R" remote set-url origin "$WT/origin.git"
+
 unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
 
 rm -rf "$HOME_STATE"

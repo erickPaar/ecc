@@ -1,0 +1,263 @@
+[
+  {
+    "label": "guard: worktree remove target by name",
+    "file": "hooks/worktree-guard.sh",
+    "find": "if [[ ! -d $t ]]; then # git also",
+    "replace": "if false; then # git also"
+  },
+  {
+    "label": "guard: worktree remove asks on changes",
+    "file": "hooks/worktree-guard.sh",
+    "find": "[[ -n $c ]] && lost+=(\"uncommitted changes in $t: $c\")",
+    "replace": ":"
+  },
+  {
+    "label": "guard: worktree remove asks on ignored files",
+    "file": "hooks/worktree-guard.sh",
+    "find": "[[ -n $ig ]] && lost+=(",
+    "replace": "false && lost+=("
+  },
+  {
+    "label": "guard: caches don't count",
+    "file": "hooks/worktree-guard.sh",
+    "find": "sed -n 's/^!! //p' | grep -Ev \"$cache_re\" | head -5",
+    "replace": "sed -n 's/^!! //p' | head -5"
+  },
+  {
+    "label": "guard: worktree remove asks on commits on no remote",
+    "file": "hooks/worktree-guard.sh",
+    "find": "[[ $n != 0 ]] && lost+=(\"$n commit(s) in $t",
+    "replace": "false && lost+=(\"$n commit(s) in $t"
+  },
+  {
+    "label": "guard: reset only with --hard",
+    "file": "hooks/worktree-guard.sh",
+    "find": "has '^--hard$' || continue",
+    "replace": ":"
+  },
+  {
+    "label": "guard: reset --hard counts only what the target drops",
+    "file": "hooks/worktree-guard.sh",
+    "find": "rev-list --count HEAD --not \"$target\" --remotes",
+    "replace": "rev-list --count HEAD --not --remotes"
+  },
+  {
+    "label": "guard: reset --hard asks on dropped commits",
+    "file": "hooks/worktree-guard.sh",
+    "find": "[[ $n != 0 ]] && lost+=(\"$n commit(s) that only",
+    "replace": "false && lost+=(\"$n commit(s) that only"
+  },
+  {
+    "label": "guard: checkout <existing path> is a pathspec",
+    "file": "hooks/worktree-guard.sh",
+    "find": "[[ $a != -* && -e $here/$a ]] && pathspec=1",
+    "replace": ":"
+  },
+  {
+    "label": "guard: checkout -f",
+    "file": "hooks/worktree-guard.sh",
+    "find": "has '^(-f|--force)$' || has '^--$'",
+    "replace": "has '^--$'"
+  },
+  {
+    "label": "guard: switch --discard-changes",
+    "file": "hooks/worktree-guard.sh",
+    "find": "has '^(-f|--force|--discard-changes)$'",
+    "replace": "false"
+  },
+  {
+    "label": "guard: restore --staged alone passes",
+    "file": "hooks/worktree-guard.sh",
+    "find": "&& ! has '^(--worktree|-[a-zA-Z]*W[a-zA-Z]*)$'; then continue; fi",
+    "replace": "; then continue; fi"
+  },
+  {
+    "label": "guard: clean only with -f/--force",
+    "file": "hooks/worktree-guard.sh",
+    "find": "has '^(--force|-[a-zA-Z]*f[a-zA-Z]*)$' || continue",
+    "replace": "has '^-[a-zA-Z]*f[a-zA-Z]*$' || continue"
+  },
+  {
+    "label": "guard: clean -n passes",
+    "file": "hooks/worktree-guard.sh",
+    "find": "has '^(--dry-run|-[a-zA-Z]*n[a-zA-Z]*)$' && continue",
+    "replace": ":"
+  },
+  {
+    "label": "guard: cd and pushd are followed",
+    "file": "hooks/worktree-guard.sh",
+    "find": "if [[ $prog == cd || $prog == pushd ]]; then",
+    "replace": "if [[ $prog == cd ]]; then"
+  },
+  {
+    "label": "guard: a cd to a missing folder stays put",
+    "file": "hooks/worktree-guard.sh",
+    "find": "d=$(abs \"${w[i+1]}\" \"$dir\"); [[ -d $d ]] && dir=$d",
+    "replace": "dir=$(abs \"${w[i+1]}\" \"$dir\")"
+  },
+  {
+    "label": "guard: keywords before git are skipped",
+    "file": "hooks/worktree-guard.sh",
+    "find": "|if|then|else|elif|do|while|until) ((i++)) ;;",
+    "replace": ") ((i++)) ;;"
+  },
+  {
+    "label": "guard: sudo options are skipped",
+    "file": "hooks/worktree-guard.sh",
+    "find": "sudo) ((i++)); while",
+    "replace": "sudo) ((i++)); while false &&"
+  },
+  {
+    "label": "guard: # starts a comment only at a word",
+    "file": "hooks/worktree-guard.sh",
+    "find": "elif comment or tok.startswith(\"#\"):",
+    "replace": "elif comment or \"#\" in tok:"
+  },
+  {
+    "label": "wt add: refuses an existing branch",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "if git -C \"$root\" show-ref -q --verify \"refs/heads/$branch\"; then",
+    "replace": "if false; then"
+  },
+  {
+    "label": "wt add: tracks a branch only on the remote",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "base=origin/$branch # a branch only on the remote",
+    "replace": ": # a branch only on the remote"
+  },
+  {
+    "label": "wt rm: refuses uncommitted changes",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "[[ -z $dirty ]] || die",
+    "replace": "true || die"
+  },
+  {
+    "label": "wt rm: refuses commits not on main",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "if [[ $unpushed != 0 ]] && ! merged",
+    "replace": "if false && ! merged"
+  },
+  {
+    "label": "wt rm: refuses the main checkout",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "&& die \"that is the main checkout\"",
+    "replace": "&& :",
+    "redundant": "wt rm runs from the main checkout, so the in-use check refuses it first; the check only gives a clearer message"
+  },
+  {
+    "label": "wt rm: keeps ignored files",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "[[ $f =~ $CACHE_RE ]] || keep_files+=(\"$f\")",
+    "replace": ":"
+  },
+  {
+    "label": "wt rm: skips caches",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "[[ $f =~ $CACHE_RE ]] || keep_files+=(\"$f\")",
+    "replace": "keep_files+=(\"$f\")"
+  },
+  {
+    "label": "wt rm: keeps the worklog",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "if [[ -n $log && -e $log ]]; then mv",
+    "replace": "if false; then mv"
+  },
+  {
+    "label": "merged: files must match main",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "if [[ ${#files[@]} -gt 0 ]] && GIT_LITERAL_PATHSPECS=1",
+    "replace": "if [[ ${#files[@]} -gt 0 ]] || GIT_LITERAL_PATHSPECS=1"
+  },
+  {
+    "label": "merged: renames count as delete plus add",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "diff -z --no-renames --name-only",
+    "replace": "diff -z --name-only"
+  },
+  {
+    "label": "worklog: values are written as is",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "t=${t//'{{owner}}'/\"$owner\"}",
+    "replace": ":"
+  },
+  {
+    "label": "worklog: template found through a symlink",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "HERE=$(cd \"$(dirname \"$(readlink -f \"${BASH_SOURCE[0]}\")\")\" && pwd -P)",
+    "replace": "HERE=$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)"
+  },
+  {
+    "label": "list: goes on past a deleted worktree",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "if [[ ! -d $w ]]; then printf",
+    "replace": "if false; then printf"
+  },
+  {
+    "label": "list: status only from the header",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "sed -n '/^## /q; ",
+    "replace": "sed -n '"
+  },
+  {
+    "label": "wt add: refuses a name with a slash",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "[[ $name == */* || $name == .* ]] && die",
+    "replace": "false && die"
+  },
+  {
+    "label": "worklog: an old worklog is moved, not reused",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "if [[ -e $log ]]; then # a worklog left",
+    "replace": "if false; then # a worklog left"
+  },
+  {
+    "label": "wt rm: refuses a worktree something runs in",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "if user=$(in_use \"$path\"); then die",
+    "replace": "if false; then die"
+  },
+  {
+    "label": "list: physical paths",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "r=$(cd \"$r\" && pwd -P) # worktree list prints physical paths",
+    "replace": ": # worktree list prints physical paths"
+  },
+  {
+    "label": "list: worklogs only under .claude/worktrees",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "if [[ $w == \"$r/$DIR/\"* && -f $log ]]; then",
+    "replace": "if [[ -f $log ]]; then"
+  },
+  {
+    "label": "merged: literal pathspecs",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "[[ ${#files[@]} -gt 0 ]] && GIT_LITERAL_PATHSPECS=1 git",
+    "replace": "[[ ${#files[@]} -gt 0 ]] && git"
+  },
+  {
+    "label": "merged: rename detection off in the compare",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "diff --quiet --no-renames HEAD",
+    "replace": "diff --quiet HEAD",
+    "redundant": "with --quiet and explicit pathspecs, pairing a delete and an add as a rename still reports a difference; the listing's --no-renames is the one that matters, and it is tested"
+  },
+  {
+    "label": "merged: gh needs this head",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "select(.headRefOid == \\\"$(git -C \"$path\" rev-parse HEAD)\\\" and ",
+    "replace": "select("
+  },
+  {
+    "label": "merged: gh needs the default branch as base",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": " and .baseRefName == \\\"${base#origin/}\\\")",
+    "replace": ")"
+  },
+  {
+    "label": "worklog: & kept on bash 5.2",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "t=${t//'{{owner}}'/\"$owner\"}",
+    "replace": "t=${t//'{{owner}}'/$owner}",
+    "needs_bash": "5.2"
+  }
+]
