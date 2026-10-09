@@ -14,9 +14,12 @@ filter=${1:-}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 trap 'echo "interrupted"; exit 130' INT TERM HUP
-tar -C "$ROOT" --exclude=./.git --exclude=./.claude/worktrees -cf - . | tar -C "$work" --one-top-level=tree -xf - \
+mkdir "$work/tree"
+tar -C "$ROOT" --exclude=./.git --exclude=./.claude/worktrees -cf - . | tar -C "$work/tree" -xf - \
   || { echo "could not copy the tree" >&2; exit 2; }
 cd "$work/tree" || exit 2
+# A copy that already fails would make every mutation look caught.
+tests/run.sh >"$work/baseline" 2>&1 || { echo "tests/run.sh fails before any mutation:" >&2; grep '^FAIL' "$work/baseline" >&2; exit 2; }
 
 python3 -I - tests/mutations.json "$filter" "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" >"$work/list" <<'PY' || exit 2
 import json, sys

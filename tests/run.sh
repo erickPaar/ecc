@@ -2,7 +2,8 @@
 # Feed the hooks the JSON Claude Code sends and check their decisions.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-export CLAUDE_PLUGIN_ROOT=$ROOT HOME_STATE=$(mktemp -d)
+HOME_STATE=$(mktemp -d)
+export CLAUDE_PLUGIN_ROOT=$ROOT HOME_STATE
 export GATEGUARD_STATE_DIR=$HOME_STATE GATEGUARD_BASH_ROUTINE_DISABLED=1
 fail=0
 
@@ -200,7 +201,7 @@ check "wt: rm refuses a rename whose old file is still on main" 1 "$(wt rm w13)"
 # Guards the mutation table asked tests for.
 check "wt: add refuses a name with a slash"        1     "$(wt add x/foo)"
 wt add g1 >/dev/null; G1=$R/.claude/worktrees/g1; echo old > "$R/.claude/worktrees/g2.md"
-check "worklog: an old worklog is moved, not reused" yes "$(wt add g2 >/dev/null; ! grep -q old "$R/.claude/worktrees/g2.md" && ls "$R/.claude/worktrees/.removed/" | grep -q '^g2-stale-' && echo yes || echo no)"
+check "worklog: an old worklog is moved, not reused" yes "$(wt add g2 >/dev/null; ! grep -q old "$R/.claude/worktrees/g2.md" && compgen -G "$R/.claude/worktrees/.removed/g2-stale-*" >/dev/null && echo yes || echo no)"
 (cd "$G1" && exec sleep 30) & SLEEPER=$!; sleep 0.3
 check "wt: rm refuses a worktree a process runs in" 1    "$(wt rm g1)"
 kill $SLEEPER 2>/dev/null; wait $SLEEPER 2>/dev/null
@@ -218,11 +219,13 @@ check "merged: a file named x* is compared literally" 0  "$(wt rm g4)"
 # GitHub's answer: a stub gh prints the pull requests in GH_PRS through the query wt.sh passes.
 mkdir -p "$WT/bin"; cat > "$WT/bin/gh" <<'GH'
 #!/usr/bin/env bash
-q=""; while [[ $# -gt 0 ]]; do [[ $1 == -q ]] && { q=$2; shift; }; shift; done
+q="" merged=""; while [[ $# -gt 0 ]]; do [[ $1 == -q ]] && { q=$2; shift; }; [[ $1 == --state && ${2:-} == merged ]] && merged=1; shift; done
+[[ -n $merged ]] || { echo '[]' | jq -r "$q"; exit 0; } # only merged pull requests count
 jq -r "$q" <<<"${GH_PRS:-[]}"
 GH
 chmod +x "$WT/bin/gh"; git -C "$R" remote set-url origin "https://github.com/someone/repo.git"
-gwt() { (cd "$R" && PATH="$WT/bin:$PATH" GH_PRS=$1 "$ROOT/skills/worktree/scripts/wt.sh" rm g5) >/dev/null 2>&1; echo $?; }
+# The github.com URL only gives wt.sh a slug; git must never reach it (no network, no prompt).
+gwt() { (cd "$R" && GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 PATH="$WT/bin:$PATH" GH_PRS=$1 "$ROOT/skills/worktree/scripts/wt.sh" rm g5) >/dev/null 2>&1; echo $?; }
 git -C "$R" remote set-url origin "$WT/origin.git"; wt add g5 >/dev/null; G5=$R/.claude/worktrees/g5
 echo five > "$G5/five.txt"; git -C "$G5" add five.txt; git -C "$G5" commit -qm five; H5=$(git -C "$G5" rev-parse HEAD)
 git -C "$R" remote set-url origin "https://github.com/someone/repo.git"
@@ -230,6 +233,89 @@ check "merged: gh at another head is not enough"   1     "$(gwt "[{\"headRefOid\
 check "merged: gh into another base is not enough" 1     "$(gwt "[{\"headRefOid\": \"$H5\", \"baseRefName\": \"develop\"}]")"
 check "merged: gh at this head into main is"       0     "$(gwt "[{\"headRefOid\": \"$H5\", \"baseRefName\": \"main\"}]")"
 git -C "$R" remote set-url origin "$WT/origin.git"
+
+# The snapshot of a session's unfinished work, saved when it ends.
+snap() { jq -cn --arg s "$1" --arg f "${3:-}" '{session_id: $s, tool_input: {file_path: $f}}' \
+  | ECC_WIP_STATE_DIR=$WT/snap "$ROOT/hooks/wip-snapshot.sh" "$2"; }
+wt add s1 >/dev/null; S1=$R/.claude/worktrees/s1; WIP=$R/.claude/worktrees/.wip
+echo staged >> "$S1/a.txt"; git -C "$S1" add a.txt; echo unstaged >> "$S1/a.txt"; echo created > "$S1/new file.txt"
+echo theirs >> "$S1/.gitignore"
+snap sa track "$S1/a.txt"; snap sa track "$S1/new file.txt"
+before=$(git -C "$S1" rev-parse HEAD; git -C "$S1" status --porcelain; md5sum "$(git -C "$S1" rev-parse --absolute-git-dir)/index")
+snap sa save; P=$(ls "$WIP"/s1-*.patch 2>/dev/null | head -1)
+check "snapshot: saves a patch in .wip"            yes   "$([[ -s $P ]] && echo yes || echo no)"
+check "snapshot: git is left exactly as it was"    yes   "$([[ $before == "$(git -C "$S1" rev-parse HEAD; git -C "$S1" status --porcelain; md5sum "$(git -C "$S1" rev-parse --absolute-git-dir)/index")" ]] && echo yes || echo no)"
+check "snapshot: only this session's files"        no    "$(grep -q gitignore "$P" && echo yes || echo no)"
+check "snapshot: the worklog says where it is"     yes   "$(grep -q 'saved in .wip/' "$R/.claude/worktrees/s1.md" && echo yes || echo no)"
+check "snapshot: the session's state is cleared"   no    "$([[ -e $WT/snap/sa ]] && echo yes || echo no)"
+git -C "$S1" checkout -q -- .gitignore; git -C "$S1" reset -q --hard origin/main; rm -f "$S1/new file.txt"
+check "snapshot: git apply brings the work back"   yes   "$(git -C "$S1" apply "$P" 2>/dev/null && grep -q unstaged "$S1/a.txt" && grep -q created "$S1/new file.txt" && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$S1/new file.txt"
+snap sb track "$S1/a.txt"; snap sb save
+check "snapshot: no changes, no patch"             1     "$(ls "$WIP"/s1-*.patch | wc -l | tr -d ' ')"
+echo m >> "$R/a.txt"; snap sc track "$R/a.txt"
+check "snapshot: never tracks the main checkout"   no    "$([[ -s $WT/snap/sc ]] && echo yes || echo no)"
+git -C "$R" checkout -q -- a.txt
+git -C "$R" worktree add -q -b s2 "$WT/outside"; echo o >> "$WT/outside/a.txt"; snap sd track "$WT/outside/a.txt"
+check "snapshot: never tracks a worktree outside .claude/worktrees" no "$([[ -s $WT/snap/sd ]] && echo yes || echo no)"
+git init -q --separate-git-dir "$R/.fake.git" "$R/.claude/worktrees/fake"; echo f > "$R/.claude/worktrees/fake/f"; snap sg track "$R/.claude/worktrees/fake/f"
+check "snapshot: a main checkout inside .claude/worktrees is not tracked" no "$([[ -s $WT/snap/sg ]] && echo yes || echo no)"
+rm -rf "$R/.claude/worktrees/fake" "$R/.fake.git"
+printf '\x00\x01\x02' > "$S1/bin.dat"; git -C "$S1" add bin.dat; git -C "$S1" commit -qm bin; printf '\x00\x09\x02\x03' > "$S1/bin.dat"
+snap sh track "$S1/bin.dat"; snap sh save; PB=$(ls -t "$WIP"/s1-*.patch | head -1); git -C "$S1" checkout -q -- bin.dat
+check "snapshot: a binary file comes back"         yes   "$(git -C "$S1" apply "$PB" 2>/dev/null && [[ $(od -An -tx1 "$S1/bin.dat" | tr -d ' ') == 00090203 ]] && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$PB"
+echo e >> "$S1/a.txt"; snap se track "$S1/a.txt"; ECC_WIP_SNAPSHOT=0 snap se save
+check "snapshot: ECC_WIP_SNAPSHOT=0 turns it off"  1     "$(ls "$WIP"/s1-*.patch | wc -l | tr -d ' ')"
+snap sf save
+check "snapshot: another session's end saves nothing" 1  "$(ls "$WIP"/s1-*.patch | wc -l | tr -d ' ')"
+git -C "$S1" checkout -q -- . 2>/dev/null; rm -f "$WIP"/s1-*.patch
+# A stat-dirty tracked file (touched, same content) must not make the snapshot write the index.
+echo real >> "$S1/a.txt"; for k in 1 2 3; do echo "f$k" > "$S1/t$k.txt"; done; git -C "$S1" add t1.txt t2.txt t3.txt; git -C "$S1" commit -qm t; sleep 1; touch "$S1"/t*.txt
+GD1=$(git -C "$S1" rev-parse --absolute-git-dir); IDX=$(md5sum < "$GD1/index")
+snap si track "$S1/a.txt"; snap si track "$S1/t1.txt"
+snap si save
+check "snapshot: a stat-dirty file doesn't rewrite the index" yes "$([[ $(md5sum < "$GD1/index") == "$IDX" && ! -e $GD1/index.lock ]] && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
+# The user's git config must not change the patch.
+cat > "$WT/hostile.gitconfig" <<'CFG'
+[color]
+  ui = always
+[diff]
+  noprefix = true
+  external = false
+[diff "upper"]
+  textconv = tr a-z A-Z
+CFG
+echo '*.up diff=upper' > "$S1/.gitattributes"; echo low > "$S1/x.up"; git -C "$S1" add .gitattributes x.up; git -C "$S1" commit -qm up
+echo changed >> "$S1/x.up"; echo newone > "$S1/n.up"; snap sj track "$S1/x.up"; snap sj track "$S1/n.up"
+GIT_CONFIG_GLOBAL=$WT/hostile.gitconfig snap sj save; PH=$(ls -t "$WIP"/s1-*.patch | head -1)
+git -C "$S1" reset -q --hard HEAD; rm -f "$S1/n.up"
+check "snapshot: the user's git config doesn't change the patch" yes "$(git -C "$S1" apply "$PH" 2>/dev/null && grep -qx changed "$S1/x.up" && grep -qx newone "$S1/n.up" && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$S1/n.up" "$PH"
+# A symlink pointing outside the worktree doesn't drop the rest of the patch.
+echo out > "$WT/outside.txt"; ln -s "$WT/outside.txt" "$S1/cfg.txt"; git -C "$S1" add cfg.txt; git -C "$S1" commit -qm link
+echo mine >> "$S1/a.txt"; echo out2 >> "$WT/outside.txt"; snap sk track "$S1/a.txt"; snap sk track "$S1/cfg.txt"; snap sk save
+check "snapshot: a symlink to outside doesn't drop the patch" yes "$(grep -q mine "$(ls -t "$WIP"/s1-*.patch | head -1)" 2>/dev/null && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
+# A file edited through a symlinked folder that points outside is skipped, and the rest is kept.
+mkdir -p "$WT/extdir"; ln -s "$WT/extdir" "$S1/ext"; echo e > "$WT/extdir/f.txt"
+echo mine2 >> "$S1/a.txt"; snap sn track "$S1/a.txt"; snap sn track "$S1/ext/f.txt"; snap sn save
+check "snapshot: a folder linked outside doesn't drop the patch" yes "$(grep -q mine2 "$(ls -t "$WIP"/s1-*.patch | head -1)" 2>/dev/null && echo yes || echo no)"
+rm -f "$S1/ext"; git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
+# A created file whose name is a glob pattern is matched literally.
+echo globbed > "$S1/[x].md"; echo plain > "$S1/x.md"; snap so track "$S1/[x].md"; snap so save
+check "snapshot: a file named like a glob is kept" yes "$(grep -q globbed "$(ls -t "$WIP"/s1-*.patch | head -1)" 2>/dev/null && ! grep -q plain "$(ls -t "$WIP"/s1-*.patch | head -1)" && echo yes || echo no)"
+rm -f "$S1/[x].md" "$S1/x.md" "$WIP"/s1-*.patch
+# A tab in a file name.
+printf 'tabbed\n' > "$S1/tab	name.txt"; snap sl track "$S1/tab	name.txt"; snap sl save
+check "snapshot: a file name with a tab is kept"   yes   "$(grep -q tabbed "$(ls -t "$WIP"/s1-*.patch | head -1)" 2>/dev/null && echo yes || echo no)"
+rm -f "$S1/tab	name.txt" "$WIP"/s1-*.patch
+# A .tmp left by a run that was killed is cleaned by the next save.
+touch "$WIP/s1-old.patch.tmp"; touch -d '2 hours ago' "$WIP/s1-old.patch.tmp"; echo z >> "$S1/a.txt"; snap sm track "$S1/a.txt"; snap sm save
+check "snapshot: an old .tmp is cleaned"           no    "$([[ -e $WIP/s1-old.patch.tmp ]] && echo yes || echo no)"
+check "snapshot: the worklog restores from the worktree's root" yes "$(grep -q 'git -C ' "$R/.claude/worktrees/s1.md" && grep -q -- '--reject' "$R/.claude/worktrees/s1.md" && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
 
 unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
 

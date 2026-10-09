@@ -259,5 +259,101 @@
     "find": "t=${t//'{{owner}}'/\"$owner\"}",
     "replace": "t=${t//'{{owner}}'/$owner}",
     "needs_bash": "5.2"
+  },
+  {
+    "label": "snapshot: never a main checkout or submodule",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "[[ $gitdir == \"$common\" ]] && return 1 # a main checkout",
+    "replace": ": # a main checkout"
+  },
+  {
+    "label": "snapshot: only under .claude/worktrees",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "[[ $top == \"$(dirname \"$common\")/.claude/worktrees/\"* ]] || return 1",
+    "replace": ":"
+  },
+  {
+    "label": "snapshot: only this session's files",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "GIT_LITERAL_PATHSPECS=1 git -C \"$top\" diff-index -p --binary --full-index HEAD -- \"${files[@]}\"",
+    "replace": "git -C \"$top\" diff-index -p --binary --full-index HEAD"
+  },
+  {
+    "label": "snapshot: includes files the session created",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "(cd \"$top\" && git diff --no-index --binary --no-color",
+    "replace": "(: && git diff --no-index --binary --no-color"
+  },
+  {
+    "label": "snapshot: no patch when nothing changed",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "if [[ -s $patch.tmp ]]; then",
+    "replace": "if true; then"
+  },
+  {
+    "label": "snapshot: notes it in the worklog",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "[[ -f $log ]] && printf -- '- %s: session ended",
+    "replace": "false && printf -- '- %s: session ended"
+  },
+  {
+    "label": "snapshot: opt-out",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "[[ ${ECC_WIP_SNAPSHOT:-1} == 0 ]] && exit 0",
+    "replace": ":"
+  },
+  {
+    "label": "snapshot: state cleared after saving",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "    rm -f \"$state\"\n    ;;\nesac",
+    "replace": "    :\n    ;;\nesac"
+  },
+  {
+    "label": "snapshot: binary-safe diff",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "diff-index -p --binary --full-index HEAD",
+    "replace": "diff-index -p HEAD"
+  },
+  {
+    "label": "merged: gh counts only merged pull requests",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "--head \"$branch\" --state merged",
+    "replace": "--head \"$branch\" --state all"
+  },
+  {
+    "label": "snapshot: plumbing diff, no index refresh",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "git -C \"$top\" diff-index -p --binary --full-index HEAD --",
+    "replace": "git -C \"$top\" diff --binary HEAD --"
+  },
+  {
+    "label": "snapshot: the user's diff settings are ignored",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "--no-color --no-ext-diff --no-textconv \\\n            --src-prefix=a/ --dst-prefix=b/",
+    "replace": "\\\n           "
+  },
+  {
+    "label": "snapshot: a tab in a name is kept",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "SEP=$'\\x1f'",
+    "replace": "SEP=$'\\t'"
+  },
+  {
+    "label": "snapshot: old .tmp files are cleaned",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "find \"$wip\" -maxdepth 1 -name '*.tmp' -mmin +60 -delete",
+    "replace": ":"
+  },
+  {
+    "label": "snapshot: restore from the worktree's root, with --reject",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "(restore: git -C %q apply --reject %q)",
+    "replace": "(restore: git apply %s)%s"
+  },
+  {
+    "label": "snapshot: literal pathspecs",
+    "file": "hooks/wip-snapshot.sh",
+    "find": "GIT_LITERAL_PATHSPECS=1 git -C \"$top\" ls-files -z --others",
+    "replace": "git -C \"$top\" ls-files -z --others"
   }
 ]
