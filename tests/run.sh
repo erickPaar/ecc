@@ -170,8 +170,9 @@ check "wt: add without origin uses HEAD"           0     "$( (cd "$NO" && "$ROOT
 wt add w7 >/dev/null; L7=$R/.claude/worktrees/w7.md
 check "worklog: add writes it beside the worktree" yes   "$([[ -f $L7 ]] && grep -q '^- branch: w7' "$L7" && echo yes || echo no)"
 check "worklog: it is never committed"             0     "$(git -C "$R/.claude/worktrees/w7" status --porcelain | wc -l | tr -d ' ')"
-sed -i 's/^- status: started/- status: writing the parser/; s/^- next:$/- next: the tests/' "$L7"
+sed -i 's/^- status: started/- status: writing the parser/; s/^- next:$/- next: the tests/' "$L7"; printf -- '- status: an old line in the log\n' >> "$L7"
 check "worklog: list shows status and next"        yes   "$(wt list >/dev/null; grep -q 'status: writing the parser' "$WT/out" && grep -q 'next:   the tests' "$WT/out" && echo yes || echo no)"
+check "worklog: list ignores the log section"     no    "$(grep -q 'an old line in the log' "$WT/out" && echo yes || echo no)"
 check "worklog: rm keeps it in .removed"           yes   "$(wt rm w7 >/dev/null; [[ ! -e $L7 && -n $(find "$R/.claude/worktrees/.removed" -name worklog.md -path '*w7-*') ]] && echo yes || echo no)"
 
 # A squash merge gives the branch's commits new ids; rm sees the content is on main.
@@ -185,7 +186,7 @@ check "wt: rm accepts a squash-merged branch"      0     "$(wt rm w8)"
 wip() { jq -cn --arg s "$1" --arg f "${3:-}" '{session_id: $s, tool_input: {file_path: $f}}' \
   | ECC_WIP_STATE_DIR=$WT/wip "$ROOT/hooks/wip-commit.sh" "$2"; }
 wt add w9 >/dev/null; W9=$R/.claude/worktrees/w9
-echo edit >> "$W9/a.txt"; echo new > "$W9/new.txt"; wip s9 track "$W9/a.txt"
+echo edit >> "$W9/a.txt"; echo new > "$W9/new.txt"; wip s9 track "$W9/a.txt"; wip s9 track "$W9/new.txt"
 check "wip: nothing committed before the session ends" 0 "$(git -C "$W9" rev-list --count origin/main..HEAD)"
 wip s9 commit
 check "wip: session end commits the tracked change" 1   "$(git -C "$W9" rev-list --count origin/main..HEAD)"
@@ -193,6 +194,7 @@ check "wip: the commit is a local wip: commit"     yes   "$([[ $(git -C "$W9" lo
 check "wip: an untracked file is left out"         yes   "$([[ -f $W9/new.txt ]] && ! git -C "$W9" ls-files --error-unmatch new.txt >/dev/null 2>&1 && echo yes || echo no)"
 check "wip: it names the file it left out"         yes   "$(git -C "$W9" log -1 --format=%b | grep -q new.txt && echo yes || echo no)"
 check "wip: it is never pushed"                    no    "$(git -C "$R" ls-remote --heads origin w9 | grep -q . && echo yes || echo no)"
+check "wip: the session's state is cleared"       no    "$([[ -e $WT/wip/s9 ]] && echo yes || echo no)"
 check "wip: the worklog records it"                yes   "$(grep -q 'kept in local commit' "$R/.claude/worktrees/w9.md" && echo yes || echo no)"
 echo edit >> "$R/a.txt"; wip s10 track "$R/a.txt"; wip s10 commit
 check "wip: the main checkout is never committed"  1     "$(git -C "$R" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
@@ -204,6 +206,47 @@ echo e2 >> "$W9/a.txt"; wip s11 track "$W9/a.txt"; ECC_WIP_COMMIT=0 wip s11 comm
 check "wip: ECC_WIP_COMMIT=0 turns it off"         1     "$(git -C "$W9" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
 wip s12 commit
 check "wip: another session's end leaves it alone" 1     "$(git -C "$W9" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+
+# The guards of the wip commit, one case each.
+wipcase() { # name, setup run in W10 after an edit to a.txt; expects no commit
+  local W10=$R/.claude/worktrees/w10; wt add w10 >/dev/null
+  echo edit >> "$W10/a.txt"; (cd "$W10" && eval "$2") >/dev/null 2>&1; wip "s-$1" track "$W10/a.txt"; wip "s-$1" commit
+  check "wip: none $1" 0 "$(git -C "$W10" log --format=%s origin/main..HEAD | grep -c '^wip:')"
+  (cd "$W10" && git merge --abort; git revert --abort; git rebase --abort; git bisect reset; git reset -q --hard origin/main) >/dev/null 2>&1
+  git -C "$W10" checkout -q --detach 2>/dev/null; git -C "$R" worktree remove --force "$W10"; git -C "$R" config --unset init.defaultBranch; git -C "$R" branch -qD w10 prod 2>/dev/null; rm -f "$R/.claude/worktrees/w10.md"
+}
+wipcase "on the default branch"      'git checkout -q -b prod; git config init.defaultBranch prod'
+wipcase "on main by name"            'git branch -m w10 main-x; git checkout -q -B master'
+wipcase "while detached"             'git checkout -q --detach'
+wipcase "with something staged"      'echo s > s2.txt; git add s2.txt'
+wipcase "during a revert"            'git commit -qam r1 && echo x>>a.txt && git commit -qam r2 && git revert --no-commit HEAD~1; echo edit >> a.txt'
+wipcase "with unmerged files"        'git checkout -q -b c1 && echo c1 > a.txt && git commit -qam c1 && git checkout -q w10 && git reset -q --hard origin/main && echo w > a.txt && git commit -qam w && git merge -q c1; echo edit >> a.txt'
+wipcase "with unmerged files from a stash pop" 'echo s >> a.txt && git stash -q && echo t >> a.txt && git commit -qam t && git stash pop -q; echo edit >> a.txt'
+wipcase "during a bisect"            'git bisect start -q HEAD HEAD 2>/dev/null || touch "$(git rev-parse --absolute-git-dir)/BISECT_LOG"'
+wipcase "when pre-commit refuses"    'mkdir -p .hooks && printf "#!/bin/sh\nexit 1\n" > .hooks/pre-commit && chmod +x .hooks/pre-commit && git config core.hooksPath "$PWD/.hooks"'
+
+# Another session's edit in the same worktree stays uncommitted.
+wt add w11 >/dev/null; W11=$R/.claude/worktrees/w11
+echo mine >> "$W11/a.txt"; echo theirs > "$W11/b.txt"; git -C "$W11" add b.txt; git -C "$W11" commit -qm b; echo theirs2 >> "$W11/b.txt"
+wip s14 track "$W11/a.txt"; wip s14 commit
+check "wip: commits only this session's files"     a.txt "$(git -C "$W11" show --name-only --format= HEAD)"
+check "wip: leaves another session's edit"         yes   "$(git -C "$W11" diff --name-only | grep -qx b.txt && echo yes || echo no)"
+check "wip: the real index matches the new HEAD"   0     "$(git -C "$W11" diff --cached --name-only | wc -l | tr -d ' ')"
+# A worktree outside .claude/worktrees is never touched.
+git -C "$R" worktree add -q -b w12 "$WT/elsewhere"; echo e >> "$WT/elsewhere/a.txt"; wip s15 track "$WT/elsewhere/a.txt"; wip s15 commit
+check "wip: a worktree outside .claude/worktrees"  0     "$(git -C "$WT/elsewhere" rev-list --count origin/main..HEAD)"
+# A separate-git-dir main checkout is a main checkout.
+git init -q --separate-git-dir "$WT/sep.git" "$WT/sep"; git -C "$WT/sep" commit -q --allow-empty -m i; git -C "$WT/sep" checkout -q -b feature
+mkdir -p "$WT/sep/.claude/worktrees/x"; echo v > "$WT/sep/.claude/worktrees/x/f"; wip s16 track "$WT/sep/.claude/worktrees/x/f"
+check "wip: never tracks a separate-git-dir main checkout" no "$([[ -s $WT/wip/s16 ]] && echo yes || echo no)"
+
+# wt.sh: special characters in the worklog, a symlinked script, renames.
+check "worklog: an owner with | & and \\ is written as is" yes "$(WT_OWNER='A | B & C\new' wt add w13 >/dev/null; grep -qF -- '- owner: A | B & C\new' "$R/.claude/worktrees/w13.md" && echo yes || echo no)"
+ln -s "$ROOT/skills/worktree/scripts/wt.sh" "$WT/wtlink"
+check "worklog: written through a symlinked script" yes "$( (cd "$R" && "$WT/wtlink" add w14) >/dev/null 2>&1; [[ -s $R/.claude/worktrees/w14.md ]] && echo yes || echo no)"
+W13=$R/.claude/worktrees/w13; git -C "$W13" mv a.txt moved.txt; git -C "$W13" commit -qm mv
+git -C "$R" checkout -q main; cp "$R/a.txt" "$R/moved.txt"; git -C "$R" add moved.txt; git -C "$R" commit -qm "moved.txt, a.txt kept"; git -C "$R" push -q origin main
+check "wt: rm refuses a rename whose old file is still on main" 1 "$(wt rm w13)"
 
 unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
 

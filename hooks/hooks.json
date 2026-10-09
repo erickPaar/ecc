@@ -55,9 +55,10 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/wip-commit.sh\" commit",
-            "timeout": 20
+            "timeout": 5
           }
-        ]
+        ],
+        "matcher": "logout|prompt_input_exit|other"
       }
     ]
   }

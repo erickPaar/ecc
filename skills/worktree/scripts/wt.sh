@@ -10,7 +10,7 @@
 set -euo pipefail
 
 DIR=.claude/worktrees
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)
 die() { echo "wt: $*" >&2; exit 1; }
 
 main_root() { # the main checkout of the repository at $1 (default: the one we are in)
@@ -56,10 +56,13 @@ cmd_add() {
   [[ $base == "origin/$branch" ]] && git -C "$path" branch -q --set-upstream-to="origin/$branch"
   # The worklog sits beside the worktree, outside its tree: never committed, readable by every session.
   local log="$root/$DIR/$name.md"
-  if [[ ! -e $log ]]; then
-    sed -e "s|{{name}}|$name|; s|{{branch}}|$branch|; s|{{base}}|$base|; s|{{date}}|$(date +%Y-%m-%d)|" \
-      -e "s|{{owner}}|${WT_OWNER:-$(git -C "$root" config user.name 2>/dev/null || true)}|" \
-      "$HERE/../templates/worklog.md" >"$log"
+  if [[ ! -e $log && -f $HERE/../templates/worklog.md ]]; then
+    local t owner
+    owner=${WT_OWNER:-$(git -C "$root" config user.name 2>/dev/null || true)}
+    t=$(<"$HERE/../templates/worklog.md")
+    t=${t//'{{name}}'/$name}; t=${t//'{{branch}}'/$branch}; t=${t//'{{base}}'/$base}
+    t=${t//'{{date}}'/$(date +%Y-%m-%d)}; t=${t//'{{owner}}'/$owner}
+    printf '%s\n' "$t" >"$log"
   fi
   echo "$path  [$branch from $base]"
   echo "worklog: $log"
@@ -89,15 +92,15 @@ merged() { # the branch's content reached the default branch, though a squash ga
   git -C "$root" fetch -q origin 2>/dev/null || true
   mb=$(git -C "$path" merge-base HEAD "$base" 2>/dev/null) || return 1
   # Every file the branch changed has the branch's content on the default branch now.
-  mapfile -d '' -t files < <(git -C "$path" diff -z --name-only "$mb" HEAD)
-  if [[ ${#files[@]} -gt 0 ]] && git -C "$path" diff --quiet HEAD "$base" -- "${files[@]}" 2>/dev/null; then
+  mapfile -d '' -t files < <(git -C "$path" diff -z --no-renames --name-only "$mb" HEAD)
+  if [[ ${#files[@]} -gt 0 ]] && GIT_LITERAL_PATHSPECS=1 git -C "$path" diff --quiet --no-renames HEAD "$base" -- "${files[@]}" 2>/dev/null; then
     echo "the commits on $branch are on $base under other ids (their files match)"; return 0
   fi
   # Or GitHub says the pull request for this exact head was merged.
   slug=$(git -C "$root" remote get-url origin 2>/dev/null | sed -E 's#^(git@github.com:|https://github.com/)##; s#\.git$##' || true)
   if [[ -n $slug ]] && command -v gh >/dev/null 2>&1; then
-    state=$(gh pr list -R "$slug" --head "$branch" --state merged --json headRefOid \
-      -q "map(select(.headRefOid == \"$(git -C "$path" rev-parse HEAD)\")) | length" 2>/dev/null || echo 0)
+    state=$(gh pr list -R "$slug" --head "$branch" --state merged --json headRefOid,baseRefName \
+      -q "map(select(.headRefOid == \"$(git -C "$path" rev-parse HEAD)\" and .baseRefName == \"${base#origin/}\")) | length" 2>/dev/null || echo 0)
     [[ $state != 0 ]] && { echo "the pull request for $branch at this head was merged"; return 0; }
   fi
   return 1
@@ -179,6 +182,7 @@ cmd_list() {
   fi
   for r in "${repos[@]}"; do
     [[ -d $r/.git ]] || die "no repository at $r"
+    r=$(cd "$r" && pwd -P) # worktree list prints physical paths
     slug=$(git -C "$r" remote get-url origin 2>/dev/null | sed -E 's#^(git@github.com:|https://github.com/)##; s#\.git$##' || true)
     echo "== $(basename "$r")${slug:+  ($slug)}"
     while IFS= read -r w; do
@@ -194,7 +198,7 @@ cmd_list() {
       printf '  %-55s %-35s %6s  changes=%-3s %s\n' "${w/#$HOME/\~}" "${b:-(detached)}" "$size" "$d" "$pr"
       log="$r/$DIR/$(basename "$w").md"
       if [[ $w == "$r/$DIR/"* && -f $log ]]; then
-        sed -n 's/^- owner: \(..*\)/      owner:  \1/p; s/^- status: \(..*\)/      status: \1/p; s/^- next: \(..*\)/      next:   \1/p' "$log"
+        sed -n '/^## /q; s/^- owner: \(..*\)/      owner:  \1/p; s/^- status: \(..*\)/      status: \1/p; s/^- next: \(..*\)/      next:   \1/p' "$log"
       fi
     done < <(git -C "$r" worktree list --porcelain | sed -n 's/^worktree //p')
   done
