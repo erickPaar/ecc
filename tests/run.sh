@@ -197,6 +197,40 @@ W13=$R/.claude/worktrees/w13; git -C "$W13" mv a.txt moved.txt; git -C "$W13" co
 git -C "$R" checkout -q main; cp "$R/a.txt" "$R/moved.txt"; git -C "$R" add moved.txt; git -C "$R" commit -qm "moved.txt, a.txt kept"; git -C "$R" push -q origin main
 check "wt: rm refuses a rename whose old file is still on main" 1 "$(wt rm w13)"
 
+# Guards the mutation table asked tests for.
+check "wt: add refuses a name with a slash"        1     "$(wt add x/foo)"
+wt add g1 >/dev/null; G1=$R/.claude/worktrees/g1; echo old > "$R/.claude/worktrees/g2.md"
+check "worklog: an old worklog is moved, not reused" yes "$(wt add g2 >/dev/null; ! grep -q old "$R/.claude/worktrees/g2.md" && ls "$R/.claude/worktrees/.removed/" | grep -q '^g2-stale-' && echo yes || echo no)"
+(cd "$G1" && exec sleep 30) & SLEEPER=$!; sleep 0.3
+check "wt: rm refuses a worktree a process runs in" 1    "$(wt rm g1)"
+kill $SLEEPER 2>/dev/null; wait $SLEEPER 2>/dev/null
+sed -i 's/^- status: started/- status: seen through a link/' "$R/.claude/worktrees/g1.md"; ln -s "$R" "$WT/rlink"
+linked=$( (cd / && WT_ROOTS="$WT/rlink" "$ROOT/skills/worktree/scripts/wt.sh" list) 2>/dev/null)
+check "worklog: list reads it through a symlinked repo path" yes "$(grep -q 'seen through a link' <<<"$linked" && echo yes || echo no)"
+git -C "$R" worktree add -q -b g3 "$WT/g3"; printf -- '- status: not this worktree\n' > "$WT/g3.md"
+check "worklog: list skips a worktree outside .claude/worktrees" no "$(wt list >/dev/null; grep -q 'not this worktree' "$WT/out" && echo yes || echo no)"
+git -C "$R" worktree remove "$WT/g3"; git -C "$R" branch -qD g3
+# A file named like a glob is compared literally.
+wt add g4 >/dev/null; G4=$R/.claude/worktrees/g4
+echo star > "$G4/x*"; git -C "$G4" add -- 'x*'; git -C "$G4" commit -qm star
+git -C "$R" checkout -q main; echo star > "$R/x*"; echo other > "$R/xa"; git -C "$R" add -- 'x*' xa; git -C "$R" commit -qm "x* and xa"; git -C "$R" push -q origin main
+check "merged: a file named x* is compared literally" 0  "$(wt rm g4)"
+# GitHub's answer: a stub gh prints the pull requests in GH_PRS through the query wt.sh passes.
+mkdir -p "$WT/bin"; cat > "$WT/bin/gh" <<'GH'
+#!/usr/bin/env bash
+q=""; while [[ $# -gt 0 ]]; do [[ $1 == -q ]] && { q=$2; shift; }; shift; done
+jq -r "$q" <<<"${GH_PRS:-[]}"
+GH
+chmod +x "$WT/bin/gh"; git -C "$R" remote set-url origin "https://github.com/someone/repo.git"
+gwt() { (cd "$R" && PATH="$WT/bin:$PATH" GH_PRS=$1 "$ROOT/skills/worktree/scripts/wt.sh" rm g5) >/dev/null 2>&1; echo $?; }
+git -C "$R" remote set-url origin "$WT/origin.git"; wt add g5 >/dev/null; G5=$R/.claude/worktrees/g5
+echo five > "$G5/five.txt"; git -C "$G5" add five.txt; git -C "$G5" commit -qm five; H5=$(git -C "$G5" rev-parse HEAD)
+git -C "$R" remote set-url origin "https://github.com/someone/repo.git"
+check "merged: gh at another head is not enough"   1     "$(gwt "[{\"headRefOid\": \"0000\", \"baseRefName\": \"main\"}]")"
+check "merged: gh into another base is not enough" 1     "$(gwt "[{\"headRefOid\": \"$H5\", \"baseRefName\": \"develop\"}]")"
+check "merged: gh at this head into main is"       0     "$(gwt "[{\"headRefOid\": \"$H5\", \"baseRefName\": \"main\"}]")"
+git -C "$R" remote set-url origin "$WT/origin.git"
+
 unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
 
 rm -rf "$HOME_STATE"

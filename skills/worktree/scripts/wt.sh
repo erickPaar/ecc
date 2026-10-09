@@ -40,6 +40,7 @@ CACHE_RE='(^|/)(__pycache__|\.pytest_cache|\.ruff_cache|\.mypy_cache|\.import_li
 
 cmd_add() {
   local name=${1:?usage: wt.sh add <name> [branch] [base]} branch=${2:-$1} base=${3:-} root path
+  [[ $name == */* || $name == .* ]] && die "a worktree name is one folder name, with no / and no leading dot: $name"
   root=$(main_root); path="$root/$DIR/$name"
   [[ -e $path ]] && die "$path already exists; look at it (wt.sh list) instead of reusing it"
   if git -C "$root" show-ref -q --verify "refs/heads/$branch"; then
@@ -56,7 +57,12 @@ cmd_add() {
   [[ $base == "origin/$branch" ]] && git -C "$path" branch -q --set-upstream-to="origin/$branch"
   # The worklog sits beside the worktree, outside its tree: never committed, readable by every session.
   local log="$root/$DIR/$name.md"
-  if [[ ! -e $log && -f $HERE/../templates/worklog.md ]]; then
+  if [[ -e $log ]]; then # a worklog left by a worktree removed without wt.sh: keep it, don't reuse it
+    mkdir -p "$root/$DIR/.removed"
+    mv "$log" "$root/$DIR/.removed/$name-stale-$(date +%Y%m%d-%H%M%S).md"
+    echo "an old worklog for $name was moved to .claude/worktrees/.removed/"
+  fi
+  if [[ -f $HERE/../templates/worklog.md ]]; then
     local t owner
     owner=${WT_OWNER:-$(git -C "$root" config user.name 2>/dev/null || true)}
     t=$(<"$HERE/../templates/worklog.md")
@@ -142,9 +148,10 @@ $dirty"
     f=${entry#'!! '}
     [[ $f =~ $CACHE_RE ]] || keep_files+=("$f")
   done < <(git -C "$path" status --porcelain=v1 -z --ignored)
-  local log
-  log="$root/$DIR/$(basename "$path").md"
-  if [[ ${#keep_files[@]} -gt 0 || -e $log ]]; then
+  local log=""
+  # Only a worktree the skill made has a worklog: <root>/.claude/worktrees/<name> beside <name>.md.
+  [[ $path == "$(cd "$root" && pwd -P)/$DIR/"* ]] && log="${path%/}.md"
+  if [[ ${#keep_files[@]} -gt 0 || ( -n $log && -e $log ) ]]; then
     backup="$root/$DIR/.removed/$(basename "$path")-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$backup"
   fi
@@ -161,7 +168,7 @@ $dirty"
   git -C "$root" worktree remove --force "$path"
   git -C "$root" worktree prune
   echo "removed $path"
-  if [[ -e $log ]]; then mv "$log" "$backup/worklog.md" && echo "kept the worklog in $backup/worklog.md"; fi
+  if [[ -n $log && -e $log ]]; then mv "$log" "$backup/worklog.md" && echo "kept the worklog in $backup/worklog.md"; fi
   if [[ -n $branch && $keep != --keep-branch ]]; then
     git -C "$root" branch -D "$branch" >/dev/null && echo "deleted local branch $branch (still on origin if it was pushed)"
   fi
@@ -197,7 +204,7 @@ cmd_list() {
           -q 'max_by(.number) // empty | "#\(.number) \(.state)"' 2>/dev/null || true)
       fi
       printf '  %-55s %-35s %6s  changes=%-3s %s\n' "${w/#$HOME/\~}" "${b:-(detached)}" "$size" "$d" "$pr"
-      log="$r/$DIR/$(basename "$w").md"
+      log="${w%/}.md"
       if [[ $w == "$r/$DIR/"* && -f $log ]]; then
         sed -n '/^## /q; s/^- owner: \(..*\)/      owner:  \1/p; s/^- status: \(..*\)/      status: \1/p; s/^- next: \(..*\)/      next:   \1/p' "$log"
       fi
