@@ -313,5 +313,11 @@
     "file": "hooks/wip-snapshot.sh",
     "find": "diff --binary HEAD",
     "replace": "diff HEAD"
+  },
+  {
+    "label": "merged: gh counts only merged pull requests",
+    "file": "skills/worktree/scripts/wt.sh",
+    "find": "--head \"$branch\" --state merged",
+    "replace": "--head \"$branch\" --state all"
   }
 ]

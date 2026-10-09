@@ -2,7 +2,8 @@
 # Feed the hooks the JSON Claude Code sends and check their decisions.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-export CLAUDE_PLUGIN_ROOT=$ROOT HOME_STATE=$(mktemp -d)
+HOME_STATE=$(mktemp -d)
+export CLAUDE_PLUGIN_ROOT=$ROOT HOME_STATE
 export GATEGUARD_STATE_DIR=$HOME_STATE GATEGUARD_BASH_ROUTINE_DISABLED=1
 fail=0
 
@@ -200,7 +201,7 @@ check "wt: rm refuses a rename whose old file is still on main" 1 "$(wt rm w13)"
 # Guards the mutation table asked tests for.
 check "wt: add refuses a name with a slash"        1     "$(wt add x/foo)"
 wt add g1 >/dev/null; G1=$R/.claude/worktrees/g1; echo old > "$R/.claude/worktrees/g2.md"
-check "worklog: an old worklog is moved, not reused" yes "$(wt add g2 >/dev/null; ! grep -q old "$R/.claude/worktrees/g2.md" && ls "$R/.claude/worktrees/.removed/" | grep -q '^g2-stale-' && echo yes || echo no)"
+check "worklog: an old worklog is moved, not reused" yes "$(wt add g2 >/dev/null; ! grep -q old "$R/.claude/worktrees/g2.md" && compgen -G "$R/.claude/worktrees/.removed/g2-stale-*" >/dev/null && echo yes || echo no)"
 (cd "$G1" && exec sleep 30) & SLEEPER=$!; sleep 0.3
 check "wt: rm refuses a worktree a process runs in" 1    "$(wt rm g1)"
 kill $SLEEPER 2>/dev/null; wait $SLEEPER 2>/dev/null
@@ -218,11 +219,13 @@ check "merged: a file named x* is compared literally" 0  "$(wt rm g4)"
 # GitHub's answer: a stub gh prints the pull requests in GH_PRS through the query wt.sh passes.
 mkdir -p "$WT/bin"; cat > "$WT/bin/gh" <<'GH'
 #!/usr/bin/env bash
-q=""; while [[ $# -gt 0 ]]; do [[ $1 == -q ]] && { q=$2; shift; }; shift; done
+q="" merged=""; while [[ $# -gt 0 ]]; do [[ $1 == -q ]] && { q=$2; shift; }; [[ $1 == --state && ${2:-} == merged ]] && merged=1; shift; done
+[[ -n $merged ]] || { echo '[]' | jq -r "$q"; exit 0; } # only merged pull requests count
 jq -r "$q" <<<"${GH_PRS:-[]}"
 GH
 chmod +x "$WT/bin/gh"; git -C "$R" remote set-url origin "https://github.com/someone/repo.git"
-gwt() { (cd "$R" && PATH="$WT/bin:$PATH" GH_PRS=$1 "$ROOT/skills/worktree/scripts/wt.sh" rm g5) >/dev/null 2>&1; echo $?; }
+# The github.com URL only gives wt.sh a slug; git must never reach it (no network, no prompt).
+gwt() { (cd "$R" && GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 PATH="$WT/bin:$PATH" GH_PRS=$1 "$ROOT/skills/worktree/scripts/wt.sh" rm g5) >/dev/null 2>&1; echo $?; }
 git -C "$R" remote set-url origin "$WT/origin.git"; wt add g5 >/dev/null; G5=$R/.claude/worktrees/g5
 echo five > "$G5/five.txt"; git -C "$G5" add five.txt; git -C "$G5" commit -qm five; H5=$(git -C "$G5" rev-parse HEAD)
 git -C "$R" remote set-url origin "https://github.com/someone/repo.git"
