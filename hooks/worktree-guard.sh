@@ -5,9 +5,8 @@
 # `git switch --discard-changes` / `-f`, `git restore` of the working tree and `git clean -f`.
 # When nothing would be lost the command passes without asking. Any failure passes too.
 
-input=$(cat)
-cmd=$(jq -r '.tool_input.command // empty' <<<"$input" 2>/dev/null)
-cwd=$(jq -r '.cwd // empty' <<<"$input" 2>/dev/null)
+# One jq call: the cwd on the first line, the command after it.
+{ IFS= read -r cwd; cmd=$(cat); } < <(jq -r '(.cwd // "" | gsub("\n"; " ")), (.tool_input.command // "")' 2>/dev/null)
 [[ -n "$cmd" && "$cmd" == *git* ]] || exit 0
 command -v python3 >/dev/null || exit 0
 export GIT_OPTIONAL_LOCKS=0
@@ -20,14 +19,20 @@ cache_re='(^|/)(__pycache__|\.pytest_cache|\.ruff_cache|\.mypy_cache|\.import_li
 # its shell words, one command per line with words separated by \x1f.
 commands=$(python3 -I - "$cmd" <<'PY' 2>/dev/null
 import shlex, sys
-lexer = shlex.shlex(sys.argv[1], posix=True, punctuation_chars=";&|()\n")
+seps = set(";&|()<>\n")
+lexer = shlex.shlex(sys.argv[1], posix=True, punctuation_chars="".join(seps))
 lexer.whitespace = " \t\r"
 lexer.whitespace_split = True
-words, out = [], []
+lexer.commenters = ""  # bash comments only start a word; handled below, so a # never eats the newline
+words, out, comment = [], [], False
 try:
     for tok in lexer:
-        if tok and set(tok) <= set(";&|()\n"):
-            if words: out.append(words); words = []
+        if tok and set(tok) <= seps:
+            if words: out.append(words)
+            words = []
+            if "\n" in tok: comment = False
+        elif comment or tok.startswith("#"):
+            comment = True
         else:
             words.append(tok)
 except ValueError:
@@ -44,13 +49,19 @@ dir=${cwd:-$PWD}
 
 while IFS=$'\x1f' read -ra w; do
   [[ ${#w[@]} -gt 0 ]] || continue
-  # Skip leading VAR=value, env, command, sudo, and the { $( that open a group.
+  # Skip what can come before the program: VAR=value, keywords, wrappers and their options.
   i=0
-  while (( i < ${#w[@]} )) && [[ ${w[i]} =~ ^[A-Za-z_][A-Za-z0-9_]*= || ${w[i]} == env || ${w[i]} == command || ${w[i]} == sudo || ${w[i]} == '{' || ${w[i]} == '$' ]]; do ((i++)); done
+  while (( i < ${#w[@]} )); do
+    case ${w[i]} in
+      [A-Za-z_]*=*|env|command|nohup|time|xargs|'!'|'{'|'$'|if|then|else|elif|do|while|until) ((i++)) ;;
+      sudo) ((i++)); while [[ ${w[i]:-} == -* ]]; do [[ ${w[i]} == -[ugCDhpRrTt] ]] && ((i++)); ((i++)); done ;;
+      *) break ;;
+    esac
+  done
   (( i < ${#w[@]} )) || continue
   prog=${w[i]##*/}
   if [[ $prog == cd || $prog == pushd ]]; then
-    [[ -n ${w[i+1]:-} && ${w[i+1]} != -* ]] && dir=$(abs "${w[i+1]}" "$dir")
+    if [[ -n ${w[i+1]:-} && ${w[i+1]} != -* ]]; then d=$(abs "${w[i+1]}" "$dir"); [[ -d $d ]] && dir=$d; fi
     continue
   fi
   [[ $prog == git ]] || continue
@@ -59,7 +70,7 @@ while IFS=$'\x1f' read -ra w; do
   # git's own options before the subcommand.
   while (( i < ${#w[@]} )) && [[ ${w[i]} == -* ]]; do
     case ${w[i]} in
-      -C) here=$(abs "${w[i+1]:-.}" "$dir"); ((i += 2)) ;;
+      -C) d=$(abs "${w[i+1]:-.}" "$dir"); [[ -d $d ]] && here=$d; ((i += 2)) ;;
       -c) ((i += 2)) ;;
       *) ((i++)) ;;
     esac
@@ -99,8 +110,11 @@ while IFS=$'\x1f' read -ra w; do
       [[ $n != 0 ]] && lost+=("$n commit(s) that only $here's branch has and $target drops")
       ;;
     checkout)
-      # Overwrites the working tree with -f/--force, with a pathspec after --, or with ".".
-      if has '^(-f|--force)$' || has '^--$' || has '^\.$'; then
+      # Overwrites the working tree with -f/--force, with a pathspec after --, with ".",
+      # or with an argument that names an existing path (git checkout [<tree-ish>] <file>).
+      pathspec=""
+      for a in "${args[@]}"; do [[ $a != -* && -e $here/$a ]] && pathspec=1; done
+      if [[ -n $pathspec ]] || has '^(-f|--force)$' || has '^--$' || has '^\.$'; then
         c=$(changes "$here"); [[ -n $c ]] && lost+=("uncommitted changes in $here: $c")
       fi
       ;;

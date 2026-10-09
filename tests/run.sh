@@ -114,6 +114,17 @@ check "wguard: checkout a branch passes"           allow "$(wg 'git checkout -b 
 git -C "$W1" checkout -q -- a.txt; mkdir -p "$W1/new"; touch "$W1/new/f"
 check "wguard: clean --force -d asks"              ask   "$(wg 'git clean -d --force' "$W1")"
 check "wguard: clean --dry-run passes"             allow "$(wg 'git clean -fd --dry-run' "$W1")"
+echo b >> "$W1/a.txt"
+check "wguard: a # comment doesn't hide the next line" ask "$(wg "$(printf 'git fetch  # update first\ngit checkout -- .')" "$W1")"
+check "wguard: a # inside a word doesn't hide it"  ask   "$(wg 'git log --format=%h#%s -1; git checkout -- .' "$W1")"
+check "wguard: git inside if/then asks"            ask   "$(wg 'if git diff --quiet; then :; else git checkout -- .; fi' "$W1")"
+check "wguard: git inside a for loop asks"         ask   "$(wg 'for d in .; do git -C "$d" checkout -- .; done' "$W1")"
+check "wguard: sudo -u x git asks"                 ask   "$(wg 'sudo -u x git reset --hard' "$W1")"
+check "wguard: checkout <file> without -- asks"    ask   "$(wg 'git checkout a.txt' "$W1")"
+check "wguard: checkout HEAD <file> asks"          ask   "$(wg 'git checkout HEAD a.txt' "$W1")"
+check "wguard: a redirect stuck to --hard asks"    ask   "$(wg 'git reset --hard>/dev/null' "$W1")"
+check "wguard: cd to a missing folder stays put"   ask   "$(wg 'cd nowhere 2>/dev/null; git checkout -- .' "$W1")"
+git -C "$W1" checkout -q -- a.txt
 rm -r "$W1/new"; git -C "$W1" commit -q --allow-empty -m ahead
 check "wguard: reset --hard to HEAD keeps commits" allow "$(wg 'git reset --hard' "$W1")"
 git -C "$W1" reset -q --hard origin/main
@@ -147,6 +158,8 @@ git -C "$R" worktree prune; git -C "$R" branch -qD w4
 W5=$R/.claude/worktrees/w5; echo x > "$W5/my file.log"; echo '*.log' >> "$R/.git/info/exclude"
 check "wt: rm keeps an ignored file with a space"  0     "$(wt rm w5)"
 check "wt: the spaced file is in .removed"         yes   "$([[ -n $(find "$R/.claude/worktrees/.removed" -name 'my file.log') ]] && echo yes || echo no)"
+W6=$R/.claude/worktrees/w6; wt add w6 >/dev/null; ln -s /nonexistent "$W6/.env"
+check "wt: rm keeps a dangling ignored symlink"    0     "$(wt rm w6)"
 git -C "$R" push -q origin main:feat/x
 check "wt: add tracks a branch only on origin"     yes   "$(wt add rev feat/x >/dev/null; [[ $(git -C "$R/.claude/worktrees/rev" rev-parse --abbrev-ref '@{u}' 2>/dev/null) == origin/feat/x ]] && echo yes || echo no)"
 check "wt: rm by absolute path from outside"       0     "$(cd / && "$ROOT/skills/worktree/scripts/wt.sh" rm "$R/.claude/worktrees/rev" >/dev/null 2>&1; echo $?)"

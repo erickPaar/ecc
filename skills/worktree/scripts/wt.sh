@@ -110,7 +110,7 @@ $dirty"
     mkdir -p "$backup"
     for f in "${keep_files[@]}"; do
       mkdir -p "$backup/$(dirname "$f")"
-      if ! cp -a "$path/$f" "$backup/$f" 2>/dev/null || [[ ! -e $backup/$f ]]; then
+      if ! cp -a "$path/$f" "$backup/$f" 2>/dev/null || [[ ! -e $backup/$f && ! -L $backup/$f ]]; then
         rm -rf "$backup"; die "could not copy $f out; nothing was removed"
       fi
     done
