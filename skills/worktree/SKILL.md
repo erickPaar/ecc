@@ -8,18 +8,30 @@ argument-hint: "add <name> [branch] [base] | rm <name> | list"
 
 Every worktree goes inside its own repository, at `<repo>/.claude/worktrees/<name>`, never beside it. Run each step through the script in this skill's folder, from inside the repository: `bash <this skill's folder>/scripts/wt.sh <add|rm|list> ...`.
 
-- `add <name> [branch] [base]` makes the worktree on a new branch, from the remote's default branch unless you give a base. A branch that exists only on the remote (a pull request to review) is tracked instead. It also adds `.claude/worktrees/` to the repository's `.git/info/exclude`, so git never shows or commits it.
+- `add <name> [branch] [base]` makes the worktree on a new branch, from the remote's default branch unless you give a base. A branch that exists only on the remote (a pull request to review) is tracked instead. It also adds `.claude/worktrees/` to the repository's `.git/info/exclude`, so git never shows or commits it, and writes the worktree's **worklog**, `.claude/worktrees/<name>.md` (see below).
 - `rm <name> [--keep-branch]` removes one worktree and its local branch, once nothing would be lost. It refuses when:
   - there are uncommitted changes;
-  - there are commits on no remote;
+  - there are commits on no remote whose content is not on the default branch either. A squash-merged branch passes: its files already match the default branch, or GitHub shows its pull request merged at that head;
   - a process or a compose project is running inside the worktree.
 
   The process check reads `/proc`, so on macOS only containers are detected.
 
-  Ignored files that are not caches (`.env`, local data) are copied to `.claude/worktrees/.removed/` and checked before the remove.
-- `list [repo...]` shows each worktree with its branch, size, uncommitted changes and pull request (when `gh` is installed). With no argument it lists the current repository, or every repository under the folders in `WT_ROOTS` (colon-separated).
+  Ignored files that are not caches (`.env`, local data) are copied to `.claude/worktrees/.removed/` and checked before the remove. The worklog goes there too.
+- `list [repo...]` shows each worktree with its branch, size, uncommitted changes and pull request (when `gh` is installed), and the owner, status and next step from its worklog. With no argument it lists the current repository, or every repository under the folders in `WT_ROOTS` (colon-separated).
 
 The plugin's `worktree-guard` hook backs this up. A bare `git worktree remove`, `git reset --hard`, `git checkout -- <path>`, `git checkout -f`, `git switch --discard-changes`, `git restore` or `git clean -f` that would throw away local work asks the user first and names what would be lost.
+
+## The worklog
+
+Every session that works in a worktree keeps its worklog current. It sits beside the worktree, outside its tree, so it is never committed and any session can read it:
+- **branch, owner, issue or brief**;
+- **status** and **next**: one line each, the first thing another session reads (`wt.sh list` shows them);
+- **plan**, **verification** (how it is shown to work), **invariants** (what must not break) and **surprises**;
+- a dated **log**.
+
+Update status and next whenever they change, and before stopping. A handoff is then the worklogs, not a summary from memory. The plan, the verification and the surprises go into the pull request's description.
+
+The plugin's `wip-commit` hook backs this up. When a session ends with uncommitted changes to tracked files in a worktree it edited, the hook makes a local `wip:` commit and adds a line to the worklog. It never pushes, never commits in the main checkout or on the default branch, and never sweeps in untracked files: it names them in the commit message instead. The squash at merge erases these commits.
 
 ## Rules
 

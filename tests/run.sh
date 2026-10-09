@@ -166,6 +166,45 @@ check "wt: rm by absolute path from outside"       0     "$(cd / && "$ROOT/skill
 NO=$WT/noorigin; git init -q "$NO"; git -C "$NO" commit -q --allow-empty -m i
 check "wt: list in a repo without origin"          0     "$( (cd "$NO" && "$ROOT/skills/worktree/scripts/wt.sh" list) >/dev/null 2>&1; echo $?)"
 check "wt: add without origin uses HEAD"           0     "$( (cd "$NO" && "$ROOT/skills/worktree/scripts/wt.sh" add n1) >/dev/null 2>&1; echo $?)"
+# The worklog beside each worktree.
+wt add w7 >/dev/null; L7=$R/.claude/worktrees/w7.md
+check "worklog: add writes it beside the worktree" yes   "$([[ -f $L7 ]] && grep -q '^- branch: w7' "$L7" && echo yes || echo no)"
+check "worklog: it is never committed"             0     "$(git -C "$R/.claude/worktrees/w7" status --porcelain | wc -l | tr -d ' ')"
+sed -i 's/^- status: started/- status: writing the parser/; s/^- next:$/- next: the tests/' "$L7"
+check "worklog: list shows status and next"        yes   "$(wt list >/dev/null; grep -q 'status: writing the parser' "$WT/out" && grep -q 'next:   the tests' "$WT/out" && echo yes || echo no)"
+check "worklog: rm keeps it in .removed"           yes   "$(wt rm w7 >/dev/null; [[ ! -e $L7 && -n $(find "$R/.claude/worktrees/.removed" -name worklog.md -path '*w7-*') ]] && echo yes || echo no)"
+
+# A squash merge gives the branch's commits new ids; rm sees the content is on main.
+wt add w8 >/dev/null; W8=$R/.claude/worktrees/w8
+echo squashed > "$W8/s.txt"; git -C "$W8" add s.txt; git -C "$W8" commit -qm one; echo more >> "$W8/s.txt"; git -C "$W8" commit -qam two
+check "wt: rm refuses commits whose content isn't on main" 1 "$(wt rm w8)"
+git -C "$R" checkout -q main; git -C "$R" merge -q --squash w8 && git -C "$R" commit -qm "squash w8" && git -C "$R" push -q origin main
+check "wt: rm accepts a squash-merged branch"      0     "$(wt rm w8)"
+
+# The WIP commit when a session ends.
+wip() { jq -cn --arg s "$1" --arg f "${3:-}" '{session_id: $s, tool_input: {file_path: $f}}' \
+  | ECC_WIP_STATE_DIR=$WT/wip "$ROOT/hooks/wip-commit.sh" "$2"; }
+wt add w9 >/dev/null; W9=$R/.claude/worktrees/w9
+echo edit >> "$W9/a.txt"; echo new > "$W9/new.txt"; wip s9 track "$W9/a.txt"
+check "wip: nothing committed before the session ends" 0 "$(git -C "$W9" rev-list --count origin/main..HEAD)"
+wip s9 commit
+check "wip: session end commits the tracked change" 1   "$(git -C "$W9" rev-list --count origin/main..HEAD)"
+check "wip: the commit is a local wip: commit"     yes   "$([[ $(git -C "$W9" log -1 --format=%s) == wip:* ]] && echo yes || echo no)"
+check "wip: an untracked file is left out"         yes   "$([[ -f $W9/new.txt ]] && ! git -C "$W9" ls-files --error-unmatch new.txt >/dev/null 2>&1 && echo yes || echo no)"
+check "wip: it names the file it left out"         yes   "$(git -C "$W9" log -1 --format=%b | grep -q new.txt && echo yes || echo no)"
+check "wip: it is never pushed"                    no    "$(git -C "$R" ls-remote --heads origin w9 | grep -q . && echo yes || echo no)"
+check "wip: the worklog records it"                yes   "$(grep -q 'kept in local commit' "$R/.claude/worktrees/w9.md" && echo yes || echo no)"
+echo edit >> "$R/a.txt"; wip s10 track "$R/a.txt"; wip s10 commit
+check "wip: the main checkout is never committed"  1     "$(git -C "$R" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+git -C "$R" checkout -q -- a.txt; git -C "$R" checkout -q -b side
+echo edit >> "$R/a.txt"; wip s13 track "$R/a.txt"; wip s13 commit
+check "wip: nor on a feature branch"              1     "$(git -C "$R" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+git -C "$R" checkout -q -- a.txt; git -C "$R" checkout -q main; git -C "$R" branch -qD side
+echo e2 >> "$W9/a.txt"; wip s11 track "$W9/a.txt"; ECC_WIP_COMMIT=0 wip s11 commit
+check "wip: ECC_WIP_COMMIT=0 turns it off"         1     "$(git -C "$W9" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+wip s12 commit
+check "wip: another session's end leaves it alone" 1     "$(git -C "$W9" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+
 unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
 
 rm -rf "$HOME_STATE"
