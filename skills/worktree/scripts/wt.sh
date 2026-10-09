@@ -60,8 +60,9 @@ cmd_add() {
     local t owner
     owner=${WT_OWNER:-$(git -C "$root" config user.name 2>/dev/null || true)}
     t=$(<"$HERE/../templates/worklog.md")
-    t=${t//'{{name}}'/$name}; t=${t//'{{branch}}'/$branch}; t=${t//'{{base}}'/$base}
-    t=${t//'{{date}}'/$(date +%Y-%m-%d)}; t=${t//'{{owner}}'/$owner}
+    # Quoted replacements: bash 5.2's patsub_replacement would turn a bare & into the matched text.
+    t=${t//'{{name}}'/"$name"}; t=${t//'{{branch}}'/"$branch"}; t=${t//'{{base}}'/"$base"}
+    t=${t//'{{date}}'/"$(date +%Y-%m-%d)"}; t=${t//'{{owner}}'/"$owner"}
     printf '%s\n' "$t" >"$log"
   fi
   echo "$path  [$branch from $base]"

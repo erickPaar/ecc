@@ -31,8 +31,6 @@ Every session that works in a worktree keeps its worklog current. It sits beside
 
 Update status and next whenever they change, and before stopping. A handoff is then the worklogs, not a summary from memory. The plan, the verification and the surprises go into the pull request's description.
 
-The plugin's `wip-commit` hook backs this up. When a session ends with uncommitted changes to tracked files in a worktree it edited, the hook makes a local `wip:` commit and adds a line to the worklog. It never pushes, never commits in the main checkout or on the default branch, and never sweeps in untracked files: it names them in the commit message instead. The squash at merge erases these commits.
-
 ## Rules
 
 - **The branch or the worktree already exists.** Stop and look (`list`, `git log <branch>`), and ask whose it is. If it isn't clearly yours, make a new one under another name. Never `reset --hard`, `checkout --` or `switch` over work you didn't make: it can be another session's uncommitted change.
