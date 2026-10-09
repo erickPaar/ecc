@@ -11,6 +11,11 @@
           },
           {
             "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/worktree-guard.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "GATEGUARD_BASH_ROUTINE_DISABLED=1 GATEGUARD_STATE_DIR=\"$HOME/.claude/gateguard\" \"${CLAUDE_PLUGIN_ROOT}/bin/node-run\" \"${CLAUDE_PLUGIN_ROOT}/bin/run-hook.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/gateguard-fact-force.js\"",
             "timeout": 10
           }

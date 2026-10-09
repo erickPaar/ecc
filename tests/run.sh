@@ -68,5 +68,105 @@ w=$(jq -cn --arg f "$T" '{tool_name: "Write", tool_input: {file_path: $f, conten
 check "write: adding a second noqa asks"      ask   "$(decision "$w")"
 rm -f "$T"
 
+# A throwaway repository with a bare remote, for the worktree guard and the worktree skill.
+WT=$(mktemp -d); export GIT_CONFIG_GLOBAL=$WT/gitconfig
+git config --global user.email t@example.com; git config --global user.name t; git config --global init.defaultBranch main
+git init -q --bare "$WT/origin.git"; git clone -q "$WT/origin.git" "$WT/repo" 2>/dev/null
+R=$WT/repo; printf '.env\n__pycache__/\n' > "$R/.gitignore"; echo a > "$R/a.txt"
+git -C "$R" add . && git -C "$R" commit -qm init && git -C "$R" push -q origin main
+git -C "$R" remote set-head origin -a >/dev/null
+
+wg_input() { jq -cn --arg c "$1" --arg d "$2" '{hook_event_name: "PreToolUse", tool_name: "Bash", cwd: $d, tool_input: {command: $c}}'; }
+wg() { decision "$(wg_input "$1" "${2:-$R}" | "$ROOT/hooks/worktree-guard.sh")"; }
+git -C "$R" worktree add -q -b w1 "$R/.claude/worktrees/w1"; W1=$R/.claude/worktrees/w1
+check "wguard: remove of a clean worktree passes"  allow "$(wg 'git worktree remove .claude/worktrees/w1')"
+mkdir -p "$W1/__pycache__"; touch "$W1/__pycache__/x.pyc"
+check "wguard: caches alone don't ask"             allow "$(wg 'git worktree remove .claude/worktrees/w1')"
+echo S=1 > "$W1/.env"
+check "wguard: remove with an ignored .env asks"   ask   "$(wg "git worktree remove --force $W1")"
+rm "$W1/.env"; echo b >> "$W1/a.txt"
+check "wguard: remove with changes asks"           ask   "$(wg 'git worktree remove .claude/worktrees/w1')"
+check "wguard: reset --hard with changes asks"     ask   "$(wg "cd $W1 && git reset --hard origin/main")"
+check "wguard: checkout -- . with changes asks"    ask   "$(wg 'git checkout -- .' "$W1")"
+check "wguard: restore with changes asks"          ask   "$(wg "git -C $W1 restore a.txt")"
+check "wguard: restore --staged passes"            allow "$(wg "git -C $W1 restore --staged a.txt")"
+git -C "$W1" checkout -q -- a.txt
+check "wguard: reset --hard when clean passes"     allow "$(wg 'git reset --hard origin/main' "$W1")"
+git -C "$W1" commit -q --allow-empty -m local
+check "wguard: reset --hard over a local commit asks" ask "$(wg 'git reset --hard origin/main' "$W1")"
+git -C "$W1" reset -q --hard origin/main; echo S=1 > "$W1/.env"
+check "wguard: clean -fdx with a .env asks"        ask   "$(wg 'git clean -fdx' "$W1")"
+check "wguard: clean -fd ignores ignored files"    allow "$(wg 'git clean -fd' "$W1")"
+check "wguard: clean -n passes"                    allow "$(wg 'git clean -ndx' "$W1")"
+check "wguard: other git commands pass"            allow "$(wg 'git status && git log -1' "$W1")"
+reason=$(wg_input 'git worktree remove .claude/worktrees/w1' "$R" | "$ROOT/hooks/worktree-guard.sh" | jq -r .hookSpecificOutput.permissionDecisionReason)
+check "wguard: reason names the file"              yes   "$([[ $reason == *.env* ]] && echo yes || echo no)"
+rm "$W1/.env"; echo b >> "$W1/a.txt"
+check "wguard: (cd w && reset --hard) asks"        ask   "$(wg "(cd $W1 && git reset --hard)")"
+check "wguard: pushd then reset --hard asks"       ask   "$(wg "pushd $W1 && git reset --hard")"
+check "wguard: /usr/bin/git reset --hard asks"     ask   "$(wg "/usr/bin/git -C $W1 reset --hard")"
+check "wguard: checkout HEAD -- file asks"         ask   "$(wg 'git checkout HEAD -- a.txt' "$W1")"
+check "wguard: checkout -f asks"                   ask   "$(wg 'git checkout -f main' "$W1")"
+check "wguard: switch --discard-changes asks"      ask   "$(wg 'git switch --discard-changes main' "$W1")"
+check "wguard: restore -W --staged asks"           ask   "$(wg 'git restore --worktree --staged .' "$W1")"
+check "wguard: restore -SW asks"                   ask   "$(wg 'git restore -SW .' "$W1")"
+check "wguard: checkout a branch passes"           allow "$(wg 'git checkout -b other' "$W1")"
+git -C "$W1" checkout -q -- a.txt; mkdir -p "$W1/new"; touch "$W1/new/f"
+check "wguard: clean --force -d asks"              ask   "$(wg 'git clean -d --force' "$W1")"
+check "wguard: clean --dry-run passes"             allow "$(wg 'git clean -fd --dry-run' "$W1")"
+echo b >> "$W1/a.txt"
+check "wguard: a # comment doesn't hide the next line" ask "$(wg "$(printf 'git fetch  # update first\ngit checkout -- .')" "$W1")"
+check "wguard: a # inside a word doesn't hide it"  ask   "$(wg 'git log --format=%h#%s -1; git checkout -- .' "$W1")"
+check "wguard: git inside if/then asks"            ask   "$(wg 'if git diff --quiet; then :; else git checkout -- .; fi' "$W1")"
+check "wguard: git inside a for loop asks"         ask   "$(wg 'for d in .; do git -C "$d" checkout -- .; done' "$W1")"
+check "wguard: sudo -u x git asks"                 ask   "$(wg 'sudo -u x git reset --hard' "$W1")"
+check "wguard: checkout <file> without -- asks"    ask   "$(wg 'git checkout a.txt' "$W1")"
+check "wguard: checkout HEAD <file> asks"          ask   "$(wg 'git checkout HEAD a.txt' "$W1")"
+check "wguard: a redirect stuck to --hard asks"    ask   "$(wg 'git reset --hard>/dev/null' "$W1")"
+check "wguard: cd to a missing folder stays put"   ask   "$(wg 'cd nowhere 2>/dev/null; git checkout -- .' "$W1")"
+git -C "$W1" checkout -q -- a.txt
+rm -r "$W1/new"; git -C "$W1" commit -q --allow-empty -m ahead
+check "wguard: reset --hard to HEAD keeps commits" allow "$(wg 'git reset --hard' "$W1")"
+git -C "$W1" reset -q --hard origin/main
+git -C "$R" worktree add -q -b w3 "$R/.claude/worktrees/my wt"; echo S=1 > "$R/.claude/worktrees/my wt/.env"
+check "wguard: quoted path with a space asks"      ask   "$(wg 'git worktree remove ".claude/worktrees/my wt"')"
+check "wguard: worktree given by name asks"        ask   "$(wg 'git worktree remove "my wt"')"
+check "wguard: commit message mentioning it passes" allow "$(wg 'git commit --allow-empty -m "no reset --hard here"')"
+rm "$R/.claude/worktrees/my wt/.env"; git -C "$R" worktree remove "$R/.claude/worktrees/my wt"; git -C "$R" branch -qD w3
+git -C "$R" worktree remove "$W1"; git -C "$R" branch -qD w1
+
+wt() { (cd "$R" && "$ROOT/skills/worktree/scripts/wt.sh" "$@") >"$WT/out" 2>&1; echo $?; }
+check "wt: add makes the worktree"                 0     "$(wt add w2)"
+check "wt: add puts it under .claude/worktrees"    yes   "$([[ -d $R/.claude/worktrees/w2 ]] && echo yes || echo no)"
+check "wt: git status doesn't show it"             0     "$(git -C "$R" status --porcelain | wc -l | tr -d ' ')"
+check "wt: add refuses an existing name"           1     "$(wt add w2)"
+W2=$R/.claude/worktrees/w2; echo c >> "$W2/a.txt"
+check "wt: rm refuses changes"                     1     "$(wt rm w2)"
+git -C "$W2" checkout -q -- a.txt; git -C "$W2" commit -q --allow-empty -m local
+check "wt: rm refuses a commit on no remote"       1     "$(wt rm w2)"
+git -C "$W2" reset -q --hard origin/main; echo S=1 > "$W2/.env"; mkdir -p "$W2/__pycache__"; touch "$W2/__pycache__/y.pyc"
+check "wt: rm removes a clean worktree"            0     "$(wt rm w2)"
+kept=$(find "$R/.claude/worktrees/.removed" -name .env | head -1)
+check "wt: rm keeps the ignored .env"              yes   "$([[ -n $kept && $(cat "$kept") == S=1 ]] && echo yes || echo no)"
+check "wt: rm skips caches"                        0     "$(find "$R/.claude/worktrees/.removed" -name '*.pyc' | wc -l | tr -d ' ')"
+check "wt: rm deletes the local branch"            no    "$(git -C "$R" show-ref -q --verify refs/heads/w2 && echo yes || echo no)"
+check "wt: rm refuses the main checkout"           1     "$(wt rm "$R")"
+check "wt: list runs"                              0     "$(wt list)"
+wt add w4 >/dev/null; wt add w5 >/dev/null; rm -rf "$R/.claude/worktrees/w4"
+check "wt: list goes on past a deleted worktree"   yes   "$(wt list >/dev/null; grep -q w5 "$WT/out" && echo yes || echo no)"
+git -C "$R" worktree prune; git -C "$R" branch -qD w4
+W5=$R/.claude/worktrees/w5; echo x > "$W5/my file.log"; echo '*.log' >> "$R/.git/info/exclude"
+check "wt: rm keeps an ignored file with a space"  0     "$(wt rm w5)"
+check "wt: the spaced file is in .removed"         yes   "$([[ -n $(find "$R/.claude/worktrees/.removed" -name 'my file.log') ]] && echo yes || echo no)"
+W6=$R/.claude/worktrees/w6; wt add w6 >/dev/null; ln -s /nonexistent "$W6/.env"
+check "wt: rm keeps a dangling ignored symlink"    0     "$(wt rm w6)"
+git -C "$R" push -q origin main:feat/x
+check "wt: add tracks a branch only on origin"     yes   "$(wt add rev feat/x >/dev/null; [[ $(git -C "$R/.claude/worktrees/rev" rev-parse --abbrev-ref '@{u}' 2>/dev/null) == origin/feat/x ]] && echo yes || echo no)"
+check "wt: rm by absolute path from outside"       0     "$(cd / && "$ROOT/skills/worktree/scripts/wt.sh" rm "$R/.claude/worktrees/rev" >/dev/null 2>&1; echo $?)"
+NO=$WT/noorigin; git init -q "$NO"; git -C "$NO" commit -q --allow-empty -m i
+check "wt: list in a repo without origin"          0     "$( (cd "$NO" && "$ROOT/skills/worktree/scripts/wt.sh" list) >/dev/null 2>&1; echo $?)"
+check "wt: add without origin uses HEAD"           0     "$( (cd "$NO" && "$ROOT/skills/worktree/scripts/wt.sh" add n1) >/dev/null 2>&1; echo $?)"
+unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
+
 rm -rf "$HOME_STATE"
 exit $fail
