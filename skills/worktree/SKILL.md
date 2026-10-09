@@ -31,7 +31,7 @@ Every session that works in a worktree keeps its worklog current. It sits beside
 
 Update status and next whenever they change, and before stopping. A handoff is then the worklogs, not a summary from memory. The plan, the verification and the surprises go into the pull request's description.
 
-The plugin's `wip-snapshot` hook backs this up. When a session ends with uncommitted changes to files it edited in a worktree, the hook saves them as a patch in `.claude/worktrees/.wip/` and adds the restore command to the worklog. It only reads git, so it can't disturb anyone's work. Edits made through Bash aren't tracked. The snapshot is a safety copy: commit your work as usual.
+The plugin's `wip-snapshot` hook backs this up. When a session ends with uncommitted changes to files it edited in a worktree, the hook saves them as a patch in `.claude/worktrees/.wip/` and adds the restore command to the worklog (`git -C <worktree> apply --reject <patch>`; `--reject` keeps what applies when two sessions edited the same file). It reads git through plumbing only, so it never locks the index and can't disturb anyone's work. Edits made through Bash aren't tracked. The snapshot is a safety copy: commit your work as usual.
 
 ## Rules
 

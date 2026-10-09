@@ -246,7 +246,7 @@ snap sa save; P=$(ls "$WIP"/s1-*.patch 2>/dev/null | head -1)
 check "snapshot: saves a patch in .wip"            yes   "$([[ -s $P ]] && echo yes || echo no)"
 check "snapshot: git is left exactly as it was"    yes   "$([[ $before == "$(git -C "$S1" rev-parse HEAD; git -C "$S1" status --porcelain; md5sum "$(git -C "$S1" rev-parse --absolute-git-dir)/index")" ]] && echo yes || echo no)"
 check "snapshot: only this session's files"        no    "$(grep -q gitignore "$P" && echo yes || echo no)"
-check "snapshot: the worklog says where it is"     yes   "$(grep -q 'git apply' "$R/.claude/worktrees/s1.md" && echo yes || echo no)"
+check "snapshot: the worklog says where it is"     yes   "$(grep -q 'saved in .wip/' "$R/.claude/worktrees/s1.md" && echo yes || echo no)"
 check "snapshot: the session's state is cleared"   no    "$([[ -e $WT/snap/sa ]] && echo yes || echo no)"
 git -C "$S1" checkout -q -- .gitignore; git -C "$S1" reset -q --hard origin/main; rm -f "$S1/new file.txt"
 check "snapshot: git apply brings the work back"   yes   "$(git -C "$S1" apply "$P" 2>/dev/null && grep -q unstaged "$S1/a.txt" && grep -q created "$S1/new file.txt" && echo yes || echo no)"
@@ -269,6 +269,53 @@ echo e >> "$S1/a.txt"; snap se track "$S1/a.txt"; ECC_WIP_SNAPSHOT=0 snap se sav
 check "snapshot: ECC_WIP_SNAPSHOT=0 turns it off"  1     "$(ls "$WIP"/s1-*.patch | wc -l | tr -d ' ')"
 snap sf save
 check "snapshot: another session's end saves nothing" 1  "$(ls "$WIP"/s1-*.patch | wc -l | tr -d ' ')"
+git -C "$S1" checkout -q -- . 2>/dev/null; rm -f "$WIP"/s1-*.patch
+# A stat-dirty tracked file (touched, same content) must not make the snapshot write the index.
+echo real >> "$S1/a.txt"; for k in 1 2 3; do echo "f$k" > "$S1/t$k.txt"; done; git -C "$S1" add t1.txt t2.txt t3.txt; git -C "$S1" commit -qm t; sleep 1; touch "$S1"/t*.txt
+GD1=$(git -C "$S1" rev-parse --absolute-git-dir); IDX=$(md5sum < "$GD1/index")
+snap si track "$S1/a.txt"; snap si track "$S1/t1.txt"
+snap si save
+check "snapshot: a stat-dirty file doesn't rewrite the index" yes "$([[ $(md5sum < "$GD1/index") == "$IDX" && ! -e $GD1/index.lock ]] && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
+# The user's git config must not change the patch.
+cat > "$WT/hostile.gitconfig" <<'CFG'
+[color]
+  ui = always
+[diff]
+  noprefix = true
+  external = false
+[diff "upper"]
+  textconv = tr a-z A-Z
+CFG
+echo '*.up diff=upper' > "$S1/.gitattributes"; echo low > "$S1/x.up"; git -C "$S1" add .gitattributes x.up; git -C "$S1" commit -qm up
+echo changed >> "$S1/x.up"; echo newone > "$S1/n.up"; snap sj track "$S1/x.up"; snap sj track "$S1/n.up"
+GIT_CONFIG_GLOBAL=$WT/hostile.gitconfig snap sj save; PH=$(ls -t "$WIP"/s1-*.patch | head -1)
+git -C "$S1" reset -q --hard HEAD; rm -f "$S1/n.up"
+check "snapshot: the user's git config doesn't change the patch" yes "$(git -C "$S1" apply "$PH" 2>/dev/null && grep -qx changed "$S1/x.up" && grep -qx newone "$S1/n.up" && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$S1/n.up" "$PH"
+# A symlink pointing outside the worktree doesn't drop the rest of the patch.
+echo out > "$WT/outside.txt"; ln -s "$WT/outside.txt" "$S1/cfg.txt"; git -C "$S1" add cfg.txt; git -C "$S1" commit -qm link
+echo mine >> "$S1/a.txt"; echo out2 >> "$WT/outside.txt"; snap sk track "$S1/a.txt"; snap sk track "$S1/cfg.txt"; snap sk save
+check "snapshot: a symlink to outside doesn't drop the patch" yes "$(grep -q mine "$(ls -t "$WIP"/s1-*.patch | head -1)" 2>/dev/null && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
+# A file edited through a symlinked folder that points outside is skipped, and the rest is kept.
+mkdir -p "$WT/extdir"; ln -s "$WT/extdir" "$S1/ext"; echo e > "$WT/extdir/f.txt"
+echo mine2 >> "$S1/a.txt"; snap sn track "$S1/a.txt"; snap sn track "$S1/ext/f.txt"; snap sn save
+check "snapshot: a folder linked outside doesn't drop the patch" yes "$(grep -q mine2 "$(ls -t "$WIP"/s1-*.patch | head -1)" 2>/dev/null && echo yes || echo no)"
+rm -f "$S1/ext"; git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
+# A created file whose name is a glob pattern is matched literally.
+echo globbed > "$S1/[x].md"; echo plain > "$S1/x.md"; snap so track "$S1/[x].md"; snap so save
+check "snapshot: a file named like a glob is kept" yes "$(grep -q globbed "$(ls -t "$WIP"/s1-*.patch | head -1)" 2>/dev/null && ! grep -q plain "$(ls -t "$WIP"/s1-*.patch | head -1)" && echo yes || echo no)"
+rm -f "$S1/[x].md" "$S1/x.md" "$WIP"/s1-*.patch
+# A tab in a file name.
+printf 'tabbed\n' > "$S1/tab	name.txt"; snap sl track "$S1/tab	name.txt"; snap sl save
+check "snapshot: a file name with a tab is kept"   yes   "$(grep -q tabbed "$(ls -t "$WIP"/s1-*.patch | head -1)" 2>/dev/null && echo yes || echo no)"
+rm -f "$S1/tab	name.txt" "$WIP"/s1-*.patch
+# A .tmp left by a run that was killed is cleaned by the next save.
+touch "$WIP/s1-old.patch.tmp"; touch -d '2 hours ago' "$WIP/s1-old.patch.tmp"; echo z >> "$S1/a.txt"; snap sm track "$S1/a.txt"; snap sm save
+check "snapshot: an old .tmp is cleaned"           no    "$([[ -e $WIP/s1-old.patch.tmp ]] && echo yes || echo no)"
+check "snapshot: the worklog restores from the worktree's root" yes "$(grep -q 'git -C ' "$R/.claude/worktrees/s1.md" && grep -q -- '--reject' "$R/.claude/worktrees/s1.md" && echo yes || echo no)"
+git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
 
 unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
 
