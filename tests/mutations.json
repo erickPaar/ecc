@@ -355,5 +355,179 @@
     "file": "hooks/wip-snapshot.sh",
     "find": "GIT_LITERAL_PATHSPECS=1 git -C \"$top\" ls-files -z --others",
     "replace": "git -C \"$top\" ls-files -z --others"
+  },
+  {
+    "label": "owner-queue: infrastructure apply held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  [MAKE_APPLY, 'infrastructure apply'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: tofu apply and destroy held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  [IAC, 'infrastructure change'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: destructive AWS calls held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  [AWS_DESTROY, 'destructive AWS call'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: AWS writes held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  [AWS_WRITE, 'AWS write'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: S3 uploads held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  [AWS_S3_UPLOAD, 'upload to S3'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: PR merges held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  [GH_MERGE, 'pull request merge'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: GitHub settings held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  [GH_SETTINGS, 'GitHub repository settings'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: GitHub API writes held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  [GH_API_WRITE, 'GitHub API write'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: settings POSTs held",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "if (GH_API_SETTINGS_POST.test(shell) && SETTINGS_PATH.test(shell))",
+    "replace": "if (false)"
+  },
+  {
+    "label": "owner-queue: comment POSTs pass",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "GH_API_SETTINGS_POST.test(shell) && SETTINGS_PATH.test(shell)",
+    "replace": "GH_API_SETTINGS_POST.test(shell)"
+  },
+  {
+    "label": "owner-queue: the person's expression holds more",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "if (new RegExp(extra).test(shell)) return 'held by your settings'",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: a heredoc read as data is not checked",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "(SHELLS.test(opening) ? whole : opening)",
+    "replace": "whole"
+  },
+  {
+    "label": "owner-queue: a heredoc a shell reads is checked",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "(SHELLS.test(opening) ? whole : opening)",
+    "replace": "opening"
+  },
+  {
+    "label": "owner-queue: a quoted argument is not checked",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "    else out += ' '\n",
+    "replace": "    else out += ` ${body} `\n"
+  },
+  {
+    "label": "owner-queue: a quote a shell runs is checked",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "    if (RUNS_QUOTE.test(before)) out += ` ${body} `\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: substitutions in double quotes are checked",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "(body.match(SUBSTITUTION) ?? [])",
+    "replace": "([] as string[])"
+  },
+  {
+    "label": "owner-queue: substitutions and subshells are checked",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": ".replace(/[`()]/g, ' ')",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: aws help pages pass",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": ".replace(AWS_HELP, ' ')",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: a program counts only where a command starts",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "const AWS_WRITE =\n  /(^|[\\s;&|!])aws\\s([^;&|\\n]*\\s)?",
+    "replace": "const AWS_WRITE =\n  /(^|[^\\w-])aws\\s(.*\\s)?"
+  },
+  {
+    "label": "owner-queue: the guard denies, never runs",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "    return { deny: text.held(what, item.id) }",
+    "replace": "    return next(e)"
+  },
+  {
+    "label": "owner-queue: the guard fails closed",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "(next.called ? next(e) : { deny: 'owner-queue: its guard failed, so the command is held.' })",
+    "replace": "next(e)"
+  },
+  {
+    "label": "owner-queue: a held command is queued",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "    const item = await add($, { command: e.command.trim(), why: e.description ?? what })",
+    "replace": "    const item = { id: 'x' }"
+  },
+  {
+    "label": "owner-queue: only the owner's output ticks",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (message.type === 'user' && e.door === 'command') {",
+    "replace": "if (message.type === 'user') {"
+  },
+  {
+    "label": "owner-queue: only user rows tick",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (message.type === 'user' && e.door === 'command') {",
+    "replace": "if (e.door === 'command' || true) {"
+  },
+  {
+    "label": "owner-queue: a failed run is not done",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "code === 0 ? 'done' : 'failed'",
+    "replace": "'done'"
+  },
+  {
+    "label": "owner-queue: the session's title names who asked",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  const from = (await read($, title)) || ctx.from\n",
+    "replace": "  const from = ctx.from\n"
+  },
+  {
+    "label": "owner-queue: a command with # gets no marker",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "!command.includes('#') && ",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: an item waits for the one before",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "first.status !== 'done' && first.status !== 'removed'",
+    "replace": "false"
+  },
+  {
+    "label": "owner-queue: old finished items leave the pane",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "now - one.updated < 3_600_000",
+    "replace": "true"
   }
 ]

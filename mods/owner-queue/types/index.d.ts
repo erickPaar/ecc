@@ -1,0 +1,24 @@
+// The values owner-queue keeps for the session. Item is also the shape of each queue file.
+export type Status = 'waiting' | 'done' | 'failed' | 'removed'
+
+export type Item = {
+  id: string
+  command: string // empty for a decision that has no command ("approve PR 116")
+  why: string
+  from: string // the session that asked
+  after?: string // the id of the item that must be done first
+  status: Status
+  code?: number // the exit code the marker reported
+  created: number
+  updated: number
+}
+
+declare module 'claude-code' {
+  interface PluginState {
+    'owner-queue': {
+      items: Item[]
+      isPaneShown: boolean
+      title: string // the session's title, kept across reloads (the event that carries it fires once)
+    }
+  }
+}

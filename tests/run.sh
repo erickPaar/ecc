@@ -319,5 +319,14 @@ git -C "$S1" reset -q --hard origin/main; rm -f "$WIP"/s1-*.patch
 
 unset GIT_CONFIG_GLOBAL; rm -rf "$WT"
 
+# The mods carry their own tests, run by the engine's test kit.
+for mod in "$ROOT"/mods/*/; do
+  name=$(basename "$mod")
+  if ! command -v claude >/dev/null; then echo "skip  $name: claude is not installed"; continue; fi
+  out=$(cd /tmp && claude plugin test "$mod" 2>&1)
+  check "mod $name: claude plugin test" pass "$(grep -qE '^ *[0-9]+ pass$' <<<"$out" && grep -qE '^ *0 fail$' <<<"$out" && echo pass || echo fail)"
+  check "mod $name: claude plugin validate" pass "$(cd /tmp && claude plugin validate "$mod" >/dev/null 2>&1 && echo pass || echo fail)"
+done
+
 rm -rf "$HOME_STATE"
 exit $fail

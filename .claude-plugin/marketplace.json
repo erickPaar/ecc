@@ -9,6 +9,12 @@
       "source": "./",
       "description": "Guards before destructive commands, lost local work and check suppressions, safe worktrees, verification loop, learning, Flutter tooling, strategic compaction and session save/resume",
       "version": "0.6.0"
+    },
+    {
+      "name": "owner-queue",
+      "source": "./mods/owner-queue",
+      "description": "A mod: the commands only you run, in one queue in a pane of every session, with Copy; a guard sends held commands there, and items tick themselves when you run them with !",
+      "version": "0.1.0"
     }
   ],
   "description": "Erick's Claude Code plugins"
