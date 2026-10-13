@@ -58,12 +58,18 @@ Set them in `~/.claude/settings.json` under `env`, or per repository in `.claude
 
 A second plugin in this marketplace, `owner-queue@erick`: a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) (2.1.287+) for a person who runs several sessions and keeps some commands for themselves.
 
-- **One queue, in a pane beside the transcript of every session.** Each item shows why, which session asked and the command, with **Copy** and **Remove**. An item that must wait for another says `after N` and has no Copy until that one is done. With the pane closed, one line above the prompt says how many wait; `/queue` opens it.
+- **One queue, in a pane beside the transcript of every session.** Each item shows why, which session asked and the whole command, with **Copy**, **Done** and **Remove**. An item that must wait for another says `after N` and has no buttons until that one is done. With the pane closed, one line above the prompt says how many wait; `/queue` opens it.
 - **Sessions add to it** with the `ask_owner_to_run` tool instead of writing commands in their answer.
-- **The guard** refuses, from the model, infrastructure applies and destroys, AWS writes and deletes, uploads to S3, `make apply`, GitHub secrets, variables and repository settings, and GitHub API writes. Each refused command goes into the queue. Reads pass. It checks what a shell would run: heredoc bodies and quoted strings handed to programs that run no commands are data, while `bash -c '…'`, `eval`, `ssh host '…'`, `$(…)` and backticks are checked. If the guard itself fails, it refuses. Your own `!` commands never reach it.
-- **The tick:** Copy adds `; echo "oq:<id>:$?"` to the command. When you run it with `!`, the item turns ✓ on exit 0 and ✗ with the exit code otherwise. Only your own `!` output counts.
+- **The guard** checks every tool call that carries a shell command (Bash, Monitor and any other), and refuses, from the model, what follows. Each refused command goes into the queue.
+  - **Infrastructure:** `tofu`, `terraform` and `terragrunt` apply, destroy, import, taint, untaint, force-unlock, refresh and state edits; `make apply`, `make destroy` and `make import`.
+  - **AWS:** every call except reads. Reads are operations named `get-`, `list-`, `describe-`, `head-` and the like, plus `query`, `scan`, `wait` and `help`, a few named reads (`logs start-query`, `athena start-query-execution`…), `sts`, `sso`, `configure` and model calls (`bedrock-runtime`). In `s3`: `ls`, `presign`, and `cp`/`sync` from S3 to here.
+  - **GitHub:** `gh workflow run|enable`, `gh run rerun`, `gh secret|variable set|delete`, `gh repo create|edit|delete|rename|archive`, and `gh api` writes. A `gh api` call counts as a write with `-X`/`--method` PUT, PATCH or DELETE, or with fields and no method (an implicit POST), when it reaches settings, dispatches or reruns; GraphQL mutations count too. Comments, edits to a pull request's or issue's body, and merges pass.
+  - **Git and plugins:** pushes to `main`/`master` (and `--mirror`), which run what the default branch applies; `claude plugin disable|uninstall` and `claude plugin marketplace remove`.
 
-The queue is a folder of JSON files, one per item, shared by every session on the machine (`~/.local/state/owner-queue`).
+  The guard reads the command the way a shell would. It splits it into the simple commands it runs, with quotes, line continuations, paths (`/usr/local/bin/tofu`) and wrappers (`env`, `sudo`, `timeout`, `nohup`…) taken off. It also opens what runs inside: `$(…)`, backticks, subshells, `bash -c`, `eval`, `ssh host …`, `watch`, `xargs`, `script -c`, heredocs read by a shell or piped into one, and substitutions in unquoted heredocs. Arguments that are only text, like a grep pattern, a commit message or a heredoc fed to python, are not commands. If the guard itself fails, it refuses. Your own `!` commands never reach it.
+- **The tick:** Copy puts `(set -o pipefail; <command>); echo "oq:<id>:$?"` on the clipboard. When you run it with `!`, the item turns ✓ on exit 0 and ✗ with the exit code otherwise, a failure anywhere in a pipeline included. Only the last line of your own `!` output counts: not a peer session, a plugin, a typed prompt or the model.
+
+The queue is a folder of JSON files, one per item, shared by every session on the machine (`~/.local/state/owner-queue`). Items finished or removed more than a day ago are deleted. The folder is not an integrity boundary: anything that can write files there can add or tick an item.
 
 ```
 /plugin install owner-queue@erick
@@ -75,7 +81,14 @@ The queue is a folder of JSON files, one per item, shared by every session on th
 | `held` | a regular expression of further commands to hold, added to the built-in list; merges pass by default, and `gh\s+pr\s+merge` holds them |
 | `dir` | the queue folder (default `~/.local/state/owner-queue`) |
 
-The guard is a best effort on the command's text. A command written to a script file and run from it is not seen, so it doesn't replace account permissions. The prod guard above still asks for anything owner-queue lets through.
+The guard catches the ways a model writes a command by accident, not deliberate evasion. It does not see:
+- a command written to a script file and run from it;
+- a program name held in a variable (`$TF apply`), or a command built in a variable and run with `eval "$CMD"`;
+- calls made from code (`python -c` with boto3, an SDK);
+- a nested `claude -p` that runs its own tools;
+- tools other than shell commands.
+
+So it doesn't replace account permissions. ecc's prod guard (above) is separate and narrower. It asks before infrastructure applies, destroys and state edits, and before AWS deletions, on Bash only. It does not cover AWS writes, uploads, GitHub settings or workflows.
 
 ## Upstream
 

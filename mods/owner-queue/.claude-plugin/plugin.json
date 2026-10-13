@@ -2,9 +2,6 @@
   "name": "owner-queue",
   "version": "0.1.0",
   "description": "One queue, in a side pane of every session, of the commands only you run: sessions add to it instead of writing commands in prose, a guard sends held commands there, Copy puts the command on your clipboard, and the item ticks itself when you run it with !.",
-  "author": {
-    "name": "Erick Santana"
-  },
   "types": "./types/index.d.ts",
   "userConfig": {
     "pane": {

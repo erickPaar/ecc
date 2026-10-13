@@ -6,12 +6,20 @@ import { atom, read, update } from 'claude-code'
 import type { Engine, Register } from 'claude-code'
 
 import type { Item } from './queue'
-import { blocker, canMark, heldReason, markers, newId, TEXT, visible, withMarker } from './queue'
+import { blocker, heldReason, marker, newId, stale, TEXT, visible, withMarker } from './queue'
 
 const PANE = 'owner-queue'
+const QUEUE_TOOL = 'mcp__owner-queue__ask_owner_to_run'
 const items = atom({ plugin: 'owner-queue', key: 'items' } as const, [] as Item[])
 const isPaneShown = atom({ plugin: 'owner-queue', key: 'isPaneShown' } as const, false)
 const title = atom({ plugin: 'owner-queue', key: 'title' } as const, '')
+
+// The origins a person's own ! command row carries (a probe on 13/10 saw `unclassified`); a peer
+// session, a plugin or a remote bridge never ticks an item.
+const OWNER_ORIGINS = new Set(['unclassified', 'composer'])
+
+// Set by register and session.start; a reload runs both again.
+const ctx = { dir: '', from: 'session', paneMode: 'auto' }
 
 async function folder($: Engine, configured: string): Promise<string> {
   if (configured !== '') return configured
@@ -32,33 +40,34 @@ async function load($: Engine, dir: string): Promise<Item[]> {
   return found.sort((a, b) => a.created - b.created)
 }
 
-async function save($: Engine, dir: string, item: Item): Promise<void> {
-  await $.process.run(['mkdir', '-p', dir])
-  await $.fs.write(`${dir}/${item.id}.json`, JSON.stringify(item, null, 2))
+async function save($: Engine, item: Item): Promise<void> {
+  if (ctx.dir === '') throw new Error('owner-queue: the queue folder is not known yet')
+  await $.fs.write(`${ctx.dir}/${item.id}.json`, JSON.stringify(item, null, 2))
 }
 
-async function refresh($: Engine, dir: string): Promise<Item[]> {
-  const now = await load($, dir)
-  await update($, items, () => now)
+// Reads the folder; redraws only when something changed.
+async function refresh($: Engine): Promise<Item[]> {
+  const now = await load($, ctx.dir)
+  const before = await read($, items)
+  if (JSON.stringify(before) !== JSON.stringify(now)) await update($, items, () => now)
   return now
 }
-
-// Set by register and session.start; a reload runs both again.
-const ctx = { dir: '', from: 'session', paneMode: 'auto' }
 
 async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after'>): Promise<Item> {
   const now = await $.clock.now()
   const from = (await read($, title)) || ctx.from
-  const item: Item = { ...fields, id: newId(now, Math.random()), from, status: 'waiting', created: now, updated: now }
-  await save($, ctx.dir, item)
-  await refresh($, ctx.dir)
+  let id = newId(now, Math.random())
+  while (await $.fs.exists(`${ctx.dir}/${id}.json`)) id = newId(now, Math.random())
+  const item: Item = { ...fields, id, from, status: 'waiting', created: now, updated: now }
+  await save($, item)
+  await refresh($)
   if (ctx.paneMode === 'auto') await showPane($)
   return item
 }
 
 async function setStatus($: Engine, item: Item, status: Item['status'], code?: number): Promise<void> {
-  await save($, ctx.dir, { ...item, status, code, updated: await $.clock.now() })
-  await refresh($, ctx.dir)
+  await save($, { ...item, status, code, updated: await $.clock.now() })
+  await refresh($)
 }
 
 async function showPane($: Engine): Promise<void> {
@@ -66,19 +75,25 @@ async function showPane($: Engine): Promise<void> {
   await update($, isPaneShown, () => placed.isPlaced)
 }
 
+// Deletes the files of items removed or done more than a day ago.
+async function prune($: Engine): Promise<void> {
+  const old = stale(await load($, ctx.dir), await $.clock.now())
+  if (old.length > 0) await $.process.run(['rm', '-f', ...old.map(one => `${ctx.dir}/${one.id}.json`)])
+}
+
 export const register: Register = (on, options) => {
-  const text = TEXT
   ctx.paneMode = (options.pane as string) ?? 'auto'
   const extra = (options.held as string) ?? ''
 
   on('session.start', async ($, e, next) => {
     ctx.dir = await folder($, (options.dir as string) ?? '')
     ctx.from = e.cwd.split('/').pop() ?? ctx.from
+    await $.process.run(['mkdir', '-p', ctx.dir])
     await $.command.register({ name: 'queue', description: 'Show the queue of commands only you run' })
     await $.tool.register({
       name: 'ask_owner_to_run',
       description:
-        'Put a command only the owner may run (an infrastructure apply, an AWS write, a repository setting) or a decision only the owner makes in the owner\'s queue, instead of writing it in your answer. One call per command, in the order they must run; pass the id of the previous one as after. The owner sees it in a pane, runs it with !, and it ticks itself.',
+        "Put a command only the owner may run (an infrastructure apply, an AWS write, a repository setting) or a decision only the owner makes in the owner's queue, instead of writing it in your answer. One call per command, in the order they must run; pass the id of the previous one as after. The owner sees it in a pane, runs it with !, and it ticks itself.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -90,9 +105,10 @@ export const register: Register = (on, options) => {
       },
       isDeferred: false,
     })
-    const now = await refresh($, ctx.dir)
+    await prune($)
+    const now = await refresh($)
     if (ctx.paneMode === 'auto' && visible(now, await $.clock.now()).length > 0) void showPane($)
-    $.clock.every(3000, () => void refresh($, ctx.dir))
+    $.clock.every(3000, () => void refresh($))
     return next(e)
   })
 
@@ -111,34 +127,33 @@ export const register: Register = (on, options) => {
     return { text: '' }
   })
 
-  on('tool.call', { tool: 'mcp__owner-queue__ask_owner_to_run' }, async ($, e) => {
+  on('tool.call', { tool: QUEUE_TOOL }, async ($, e) => {
     const input = e as unknown as { command?: string; why?: string; after?: string }
     const item = await add($, { command: (input.command ?? '').trim(), why: input.why ?? '', after: input.after || undefined })
-    return { result: text.queued(item.id) }
+    return { result: TEXT.queued(item.id) }
   })
 
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const what = heldReason(e.command, extra)
+  // The guard: every tool whose input is a shell command (Bash, Monitor, and any other).
+  on('tool.call', async ($, e, next) => {
+    const input = e as unknown as { tool: string; command?: unknown; description?: unknown }
+    if (input.tool === QUEUE_TOOL || typeof input.command !== 'string') return next(e)
+    const what = heldReason(input.command, extra)
     if (what === undefined) return next(e)
-    const item = await add($, { command: e.command.trim(), why: e.description ?? what })
-    $.ui.toast(text.held(what, item.id).split(':')[0])
-    return { deny: text.held(what, item.id) }
+    const why = typeof input.description === 'string' && input.description !== '' ? input.description : what
+    const item = await add($, { command: input.command.trim(), why })
+    $.ui.toast(TEXT.held(what, item.id).split(':')[0])
+    return { deny: TEXT.held(what, item.id) }
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'owner-queue: its guard failed, so the command is held.' }))
 
-  // The owner's ! commands arrive here as rows; their output carries the markers.
+  // The owner's ! commands arrive here as rows; the last line of their output is the marker.
   on('session.append', async ($, e, next) => {
     const message = e.message as { type?: string; content?: readonly { type: string; text?: string }[] }
-    if (message.type === 'user' && e.door === 'command') {
-      const body = (message.content ?? []).map(part => part.text ?? '').join('\n')
-      if (body.includes('<bash-stdout>')) {
-        const ran = markers(body)
-        if (ran.length > 0) {
-          const now = await load($, ctx.dir)
-          for (const { id, code } of ran) {
-            const item = now.find(one => one.id === id)
-            if (item !== undefined) await setStatus($, item, code === 0 ? 'done' : 'failed', code)
-          }
-        }
+    const origin = (e as unknown as { origin?: { kind?: string } }).origin?.kind ?? ''
+    if (message.type === 'user' && e.door === 'command' && OWNER_ORIGINS.has(origin)) {
+      const ran = marker((message.content ?? []).map(part => part.text ?? '').join('\n'))
+      if (ran !== undefined) {
+        const item = (await load($, ctx.dir)).find(one => one.id === ran.id)
+        if (item !== undefined) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', ran.code)
       }
     }
     return next(e)
@@ -149,12 +164,12 @@ export const register: Register = (on, options) => {
     const all = await read($, items)
     const shown = visible(all, await $.clock.now())
     const open = shown.filter(one => one.status !== 'done')
-    const number = (item: Item) => all.filter(one => one.status !== 'removed').indexOf(item) + 1
+    const number = (item: Item) => open.indexOf(item) + 1
 
     return (
       <Box flexDirection="column" paddingX={1}>
         <Text bold color={open.length > 0 ? 'red' : 'green'}>
-          {open.length > 0 ? text.title(open.length) : text.empty}
+          {open.length > 0 ? TEXT.title(open.length) : TEXT.empty}
         </Text>
         {shown.map(item => {
           const first = blocker(item, all)
@@ -167,11 +182,11 @@ export const register: Register = (on, options) => {
               </Text>
               <Text dimColor wrap="truncate-end">
                 {item.from}
-                {first !== undefined ? ` · ${text.after(number(first))}` : ''}
-                {isFailed ? ` · ${text.failed(item.code ?? -1)}` : ''}
+                {first !== undefined ? ` · ${TEXT.after(number(first))}` : ''}
+                {isFailed ? ` · ${TEXT.failed(item.code ?? -1)}` : ''}
               </Text>
               {item.command !== '' && (
-                <Text dimColor wrap="truncate-middle">
+                <Text dimColor wrap="wrap">
                   {item.command}
                 </Text>
               )}
@@ -180,17 +195,15 @@ export const register: Register = (on, options) => {
                   {item.command !== '' && (
                     <Button
                       key={`copy-${item.id}`}
-                      label={text.copy}
+                      label={TEXT.copy}
                       onPress={async () => {
                         await $.ui.copy({ text: withMarker(item), surface: e.surface })
-                        $.ui.toast(text.copied)
+                        $.ui.toast(TEXT.copied)
                       }}
                     />
                   )}
-                  {!canMark(item.command) && (
-                    <Button key={`done-${item.id}`} label={text.done} onPress={() => setStatus($, item, 'done')} />
-                  )}
-                  <Button key={`remove-${item.id}`} label={text.remove} onPress={() => setStatus($, item, 'removed')} />
+                  <Button key={`done-${item.id}`} label={TEXT.done} onPress={() => setStatus($, item, 'done')} />
+                  <Button key={`remove-${item.id}`} label={TEXT.remove} onPress={() => setStatus($, item, 'removed')} />
                 </Box>
               )}
             </Box>
@@ -200,7 +213,7 @@ export const register: Register = (on, options) => {
           <Box marginTop={1}>
             <Button
               key="clear"
-              label={text.clear}
+              label={TEXT.clear}
               onPress={async () => {
                 for (const item of shown.filter(one => one.status === 'done')) await setStatus($, item, 'removed')
               }}
@@ -218,7 +231,7 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     return (
       <Box>
-        <Text color="red">● {text.band(open.length)} </Text>
+        <Text color="red">● {TEXT.band(open.length)} </Text>
         <Button key="open" label="›" onPress={() => showPane($)} />
       </Box>
     )
