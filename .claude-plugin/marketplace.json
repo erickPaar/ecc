@@ -15,6 +15,12 @@
       "source": "./mods/owner-queue",
       "description": "A mod: the commands only you run, in one queue in a pane of every session, with Copy; a guard sends held commands there, and items tick themselves when you run them with !",
       "version": "0.1.0"
+    },
+    {
+      "name": "side-panel",
+      "source": "./mods/side-panel",
+      "description": "A mod: a pane beside the transcript with the open pull requests of your repositories, a Review button on each head nobody reviewed yet, and sections your own command prints",
+      "version": "0.1.0"
     }
   ],
   "description": "Erick's Claude Code plugins"
