@@ -387,12 +387,6 @@
     "replace": ""
   },
   {
-    "label": "owner-queue: PR merges held",
-    "file": "mods/owner-queue/hooks/queue.ts",
-    "find": "  [GH_MERGE, 'pull request merge'],\n",
-    "replace": ""
-  },
-  {
     "label": "owner-queue: GitHub settings held",
     "file": "mods/owner-queue/hooks/queue.ts",
     "find": "  [GH_SETTINGS, 'GitHub repository settings'],\n",

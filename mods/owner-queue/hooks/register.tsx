@@ -78,7 +78,7 @@ export const register: Register = (on, options) => {
     await $.tool.register({
       name: 'ask_owner_to_run',
       description:
-        'Put a command only the owner may run (an infrastructure apply, an AWS write, a merge, a repository setting) or a decision only the owner makes in the owner\'s queue, instead of writing it in your answer. One call per command, in the order they must run; pass the id of the previous one as after. The owner sees it in a pane, runs it with !, and it ticks itself.',
+        'Put a command only the owner may run (an infrastructure apply, an AWS write, a repository setting) or a decision only the owner makes in the owner\'s queue, instead of writing it in your answer. One call per command, in the order they must run; pass the id of the previous one as after. The owner sees it in a pane, runs it with !, and it ticks itself.',
       inputSchema: {
         type: 'object',
         properties: {

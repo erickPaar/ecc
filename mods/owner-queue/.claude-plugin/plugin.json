@@ -21,7 +21,7 @@
     "held": {
       "type": "string",
       "title": "More held commands",
-      "description": "A regular expression of further commands the model may not run, added to the built-in list (infrastructure applies, destructive AWS calls, PR merges, GitHub API writes). Empty adds none.",
+      "description": "A regular expression of further commands the model may not run, added to the built-in list (infrastructure applies, AWS writes and deletes, GitHub settings and API writes). Empty adds none.",
       "default": ""
     },
     "dir": {

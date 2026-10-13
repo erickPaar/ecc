@@ -13,7 +13,6 @@ const HELD = [
   'aws ssm put-parameter --name /x --value y',
   'aws s3 cp ./file s3://bucket/key',
   'aws s3 sync ./dir s3://bucket/prefix --delete',
-  'gh pr merge 113 --squash',
   'gh variable set AGENT_ECR_REPOSITORY --body x',
   'gh secret delete TOKEN',
   'gh repo edit --default-branch main',
@@ -36,6 +35,7 @@ const ALLOWED = [
   'aws s3 cp s3://bucket/key ./file',
   'aws ssm get-parameter --name /x',
   'gh pr view 113',
+  'gh pr merge 113 --squash',
   'gh pr comment 113 --body "verdict"',
   'gh api repos/o/r/pulls/113',
   'gh api -X POST repos/o/r/issues/113/comments -f body=x',
@@ -57,7 +57,7 @@ const ALLOWED = [
 const HELD_QUOTED = [
   "bash -c 'tofu apply'",
   'sh -lc "make apply STACK=agent"',
-  'eval "gh pr merge 1 --squash"',
+  'eval "gh variable set X --body y"',
   "ssh host 'aws s3 rm s3://b/k'",
   'echo "$(make apply STACK=agent)"',
   'x="`tofu apply`"',
@@ -94,6 +94,10 @@ describe('heldReason', () => {
   })
   test('the person\'s own expression holds more', () => {
     expect(heldReason('kubectl delete pod x', 'kubectl\\s+delete')).toBe('held by your settings')
+  })
+  test('merges pass unless the person holds them', () => {
+    expect(heldReason('gh pr merge 5 --squash')).toBeUndefined()
+    expect(heldReason('gh pr merge 5 --squash', 'gh\\s+pr\\s+merge')).toBe('held by your settings')
   })
   test('an invalid expression of the person holds nothing more', () => {
     expect(heldReason('kubectl delete pod x', '(')).toBeUndefined()

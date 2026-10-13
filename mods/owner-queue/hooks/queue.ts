@@ -18,7 +18,6 @@ const AWS_WRITE =
 const AWS_S3_UPLOAD =
   /(^|[\s;&|!])aws\s([^;&|\n]*\s)?s3\s+(cp|sync)\s+([^;&|\n]*\s)?s3:\/\/\S+(\s+--\S+(\s+[^-\s;&|]\S*)?)*\s*(?=$|[;&|\n])/
 const MAKE_APPLY = /(^|[\s;&|!])make\s([^;&|\n]*\s)?apply(\s|$)/
-const GH_MERGE = /(^|[\s;&|!])gh\s+pr\s+merge(\s|$)/
 const GH_SETTINGS =
   /(^|[\s;&|!])gh\s+((secret|variable)\s+(set|delete|remove)|repo\s+(edit|delete|rename|archive|create)|ruleset\s+\S+)(\s|$)/
 const GH_API_WRITE = /(^|[\s;&|!])gh\s+api\s([^;&|\n]*\s)?(-X|--method)[\s=]*(PUT|PATCH|DELETE)(\s|$)/i
@@ -31,7 +30,6 @@ const RULES: readonly [RegExp, string][] = [
   [AWS_WRITE, 'AWS write'],
   [AWS_S3_UPLOAD, 'upload to S3'],
   [MAKE_APPLY, 'infrastructure apply'],
-  [GH_MERGE, 'pull request merge'],
   [GH_SETTINGS, 'GitHub repository settings'],
   [GH_API_WRITE, 'GitHub API write'],
 ]

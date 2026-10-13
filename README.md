@@ -60,7 +60,7 @@ A second plugin in this marketplace, `owner-queue@erick`: a [Claude Code mod](ht
 
 - **One queue, in a pane beside the transcript of every session.** Each item shows why, which session asked and the command, with **Copy** and **Remove**. An item that must wait for another says `after N` and has no Copy until that one is done. With the pane closed, one line above the prompt says how many wait; `/queue` opens it.
 - **Sessions add to it** with the `ask_owner_to_run` tool instead of writing commands in their answer.
-- **The guard** refuses, from the model, infrastructure applies and destroys, AWS writes and deletes, uploads to S3, `make apply`, `gh pr merge`, GitHub secrets, variables and repository settings, and GitHub API writes. Each refused command goes into the queue. Reads pass. It checks what a shell would run: heredoc bodies and quoted strings handed to programs that run no commands are data, while `bash -c '…'`, `eval`, `ssh host '…'`, `$(…)` and backticks are checked. If the guard itself fails, it refuses. Your own `!` commands never reach it.
+- **The guard** refuses, from the model, infrastructure applies and destroys, AWS writes and deletes, uploads to S3, `make apply`, GitHub secrets, variables and repository settings, and GitHub API writes. Each refused command goes into the queue. Reads pass. It checks what a shell would run: heredoc bodies and quoted strings handed to programs that run no commands are data, while `bash -c '…'`, `eval`, `ssh host '…'`, `$(…)` and backticks are checked. If the guard itself fails, it refuses. Your own `!` commands never reach it.
 - **The tick:** Copy adds `; echo "oq:<id>:$?"` to the command. When you run it with `!`, the item turns ✓ on exit 0 and ✗ with the exit code otherwise. Only your own `!` output counts.
 
 The queue is a folder of JSON files, one per item, shared by every session on the machine (`~/.local/state/owner-queue`).
@@ -72,7 +72,7 @@ The queue is a folder of JSON files, one per item, shared by every session on th
 | Setting | Effect |
 |---------|--------|
 | `pane` | `auto` opens the pane when something waits; `command` only with `/queue`; `off` never (the line above the prompt stays) |
-| `held` | a regular expression of further commands to hold, added to the built-in list |
+| `held` | a regular expression of further commands to hold, added to the built-in list; merges pass by default, and `gh\s+pr\s+merge` holds them |
 | `dir` | the queue folder (default `~/.local/state/owner-queue`) |
 
 The guard is a best effort on the command's text. A command written to a script file and run from it is not seen, so it doesn't replace account permissions. The prod guard above still asks for anything owner-queue lets through.
