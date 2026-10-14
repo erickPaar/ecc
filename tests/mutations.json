@@ -355,5 +355,1280 @@
     "file": "hooks/wip-snapshot.sh",
     "find": "GIT_LITERAL_PATHSPECS=1 git -C \"$top\" ls-files -z --others",
     "replace": "git -C \"$top\" ls-files -z --others"
+  },
+  {
+    "label": "owner-queue: iac apply held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "const IAC_WRITES = new Set(['apply', ",
+    "replace": "const IAC_WRITES = new Set(['apply-not', "
+  },
+  {
+    "label": "owner-queue: iac destroy held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'destroy', 'import', 'taint'",
+    "replace": "'import', 'taint'"
+  },
+  {
+    "label": "owner-queue: iac import held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'destroy', 'import', 'taint'",
+    "replace": "'destroy', 'taint'"
+  },
+  {
+    "label": "owner-queue: iac taint held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'import', 'taint', 'untaint'",
+    "replace": "'import', 'untaint'"
+  },
+  {
+    "label": "owner-queue: iac force-unlock held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'untaint', 'force-unlock', 'refresh'",
+    "replace": "'untaint', 'refresh'"
+  },
+  {
+    "label": "owner-queue: state edits held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "['rm', 'mv', 'push', 'replace-provider'].includes(second)",
+    "replace": "['rm'].includes(second)"
+  },
+  {
+    "label": "owner-queue: run-all held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "(first === 'run-all' || first === 'run') && ",
+    "replace": "false && "
+  },
+  {
+    "label": "owner-queue: terragrunt is iac",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    case 'terragrunt':\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: make -C takes a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (MAKE_VALUE_FLAGS.has(a)) i += 1\n    else if",
+    "replace": "    if (false) i += 1\n    else if"
+  },
+  {
+    "label": "owner-queue: make destroy and import held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "['apply', 'destroy', 'import'].includes(a)) return 'infrastructure change'",
+    "replace": "['apply'].includes(a)) return 'infrastructure change'"
+  },
+  {
+    "label": "owner-queue: aws global options take a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (AWS_VALUE_OPTIONS.has(a)) i += 1\n    else if (!a.startsWith('-')) words.push(a)",
+    "replace": "    if (!a.startsWith('-')) words.push(a)"
+  },
+  {
+    "label": "owner-queue: aws help passes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (args[last] === 'help' && last > 0 && !(args[last - 1] ?? '-').startsWith('-')) return undefined\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: aws read prefixes pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "AWS_READ_PREFIXES.some(p => op.startsWith(p))",
+    "replace": "false"
+  },
+  {
+    "label": "owner-queue: aws read whole verbs pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if (AWS_READ_WHOLE.has(op) || ",
+    "replace": "if ("
+  },
+  {
+    "label": "owner-queue: aws read services pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (AWS_READ_SERVICES.has(service)) return undefined\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: aws read operations pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (AWS_READ_OPS.has(`${service} ${op}`)) return undefined\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: aws writes are held, not only deletes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    ? 'destructive AWS call'\n    : 'AWS write'",
+    "replace": "    ? 'destructive AWS call'\n    : undefined"
+  },
+  {
+    "label": "owner-queue: aws deletes named destructive",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "/^(delete|terminate|remove|deregister|purge|revoke|disable|schedule-key-deletion|batch-delete)/",
+    "replace": "/^(delete)/"
+  },
+  {
+    "label": "owner-queue: s3 ls passes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if (op === undefined || op === 'ls' || op === 'presign') return undefined",
+    "replace": "if (op === undefined) return undefined"
+  },
+  {
+    "label": "owner-queue: s3 option values are not paths",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (S3_VALUE_OPTIONS.has(a) || AWS_VALUE_OPTIONS.has(a)) i += 1\n    else if (!a.startsWith('-')) positional.push(a)",
+    "replace": "    if (!a.startsWith('-')) positional.push(a)"
+  },
+  {
+    "label": "owner-queue: s3 uploads held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "positional.slice(1).some(p => p.startsWith('s3://')) ? 'upload to S3' : undefined",
+    "replace": "false ? 'upload to S3' : undefined"
+  },
+  {
+    "label": "owner-queue: s3 downloads pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "positional.slice(1).some(p => p.startsWith('s3://')) ? 'upload to S3'",
+    "replace": "positional.some(p => p.startsWith('s3://')) ? 'upload to S3'"
+  },
+  {
+    "label": "owner-queue: s3 mv held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (op === 'mv') return positional.some(p => p.startsWith('s3://')) ? 'destructive AWS call' : undefined\n",
+    "replace": "  if (op === 'mv') return undefined\n"
+  },
+  {
+    "label": "owner-queue: s3 rm and rb held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "return op === 'rm' || op === 'rb' ? 'destructive AWS call' : 'AWS write'",
+    "replace": "return op === 'mb' ? 'AWS write' : undefined"
+  },
+  {
+    "label": "owner-queue: gh workflow run held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if (group === 'workflow' && ['run', 'enable'].includes(verb))",
+    "replace": "if (group === 'workflow' && ['enable'].includes(verb))"
+  },
+  {
+    "label": "owner-queue: gh run rerun held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (group === 'run' && verb === 'rerun') return 'GitHub Actions run'\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: gh secrets and variables held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "(group === 'secret' || group === 'variable') && ['set', 'delete', 'remove']",
+    "replace": "(group === 'secret') && ['set', 'delete']"
+  },
+  {
+    "label": "owner-queue: gh repo settings held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "['edit', 'delete', 'rename', 'archive', 'create'].includes(verb)",
+    "replace": "['edit'].includes(verb)"
+  },
+  {
+    "label": "owner-queue: gh -R takes a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (GH_VALUE_OPTIONS.has(a)) i += 1\n",
+    "replace": "    if (false) i += 1\n"
+  },
+  {
+    "label": "owner-queue: gh api explicit method",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (a === '-X' || a === '--method') method = (args[++i] ?? '').toUpperCase()\n",
+    "replace": "    if (a === '-X' || a === '--method') i += 1\n"
+  },
+  {
+    "label": "owner-queue: gh api --method=",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (a.startsWith('--method=')) method = a.slice(9).toUpperCase()\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: gh api -XMETHOD",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (/^-X./.test(a)) method = a.slice(2).toUpperCase()\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: gh api fields mean POST",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (method === '') method = hasFields ? 'POST' : 'GET'",
+    "replace": "  if (method === '') method = 'GET'"
+  },
+  {
+    "label": "owner-queue: gh api --input means POST",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "      hasFields = true\n      hasInput = true\n",
+    "replace": "      hasInput = true\n"
+  },
+  {
+    "label": "owner-queue: graphql mutations held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "values.some(v => /\\bmutation\\b/.test(v) || /^query=@/.test(v))",
+    "replace": "values.some(v => /^query=@/.test(v))"
+  },
+  {
+    "label": "owner-queue: PR and issue edits pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (method === 'PATCH' && EDITS_WORK.test(endpoint)) return undefined\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: PR merge through the API passes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (method === 'PUT' && MERGE.test(endpoint)) return undefined // merges stay with the session\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: settings POSTs held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (method === 'POST') return SETTINGS_PATH.test(endpoint) ? 'GitHub API write' : undefined",
+    "replace": "  if (method === 'POST') return undefined"
+  },
+  {
+    "label": "owner-queue: comment POSTs pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (method === 'POST') return SETTINGS_PATH.test(endpoint) ? 'GitHub API write' : undefined",
+    "replace": "  if (method === 'POST') return 'GitHub API write'"
+  },
+  {
+    "label": "owner-queue: dispatches and reruns held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|\\/(dispatches|rerun|rerun-failed-jobs|approve|pending_deployments|transfer)$/",
+    "replace": "|\\/(pending_deployments|transfer)$/"
+  },
+  {
+    "label": "owner-queue: pushes to main held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "refs.some(r => /(^|:|refs\\/heads\\/)(main|master)$/.test(r))",
+    "replace": "refs.some(r => /^(main|master)$/.test(r))"
+  },
+  {
+    "label": "owner-queue: push --mirror held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "a === '--all' || a === '--mirror' || a === '--branches'",
+    "replace": "a === '--all' || a === '--branches'"
+  },
+  {
+    "label": "owner-queue: plugin disable held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "['disable', 'uninstall', 'remove'].includes(second)",
+    "replace": "['uninstall'].includes(second)"
+  },
+  {
+    "label": "owner-queue: marketplace remove held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (second === 'marketplace' && third === 'remove') return 'plugin settings'\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: the person's expression holds more",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "(ctx.extra?.test(run.join(' ')) ? 'held by your settings' : undefined)",
+    "replace": "undefined"
+  },
+  {
+    "label": "owner-queue: handed-over commands are judged",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    for (const inner of handedOver(argv)) {\n      if (depth >= 4)",
+    "replace": "    for (const inner of [] as string[]) {\n      if (depth >= 4)"
+  },
+  {
+    "label": "owner-queue shell: continuations join lines",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (src[i + 1] === '\\n' || (src[i + 1] === '\\r' && src[i + 2] === '\\n')) {\n        i += src[i + 1] === '\\n' ? 2 : 3\n        continue\n      }\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: backslash escapes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (c === '\\\\' && i + 1 < src.length) {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue shell: ANSI-C quotes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (c === '$' && src[i + 1] === \"'\") {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue shell: substitutions in double quotes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "        } else if (src[j] === '$' && src[j + 1] === '(') {\n          const end = closing(src, j + 1)\n          nested(src.slice(j + 2, end))",
+    "replace": "        } else if (src[j] === '$' && src[j + 1] === '(') {\n          const end = closing(src, j + 1)\n          void end"
+  },
+  {
+    "label": "owner-queue shell: backticks in double quotes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "          nested(src.slice(j + 1, end < 0 ? src.length : end))\n          j = end",
+    "replace": "          j = end"
+  },
+  {
+    "label": "owner-queue shell: bare substitutions",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      nested(src.slice(i + 2, end))\n      hasWord = true // the substitution's output",
+    "replace": "      hasWord = true // the substitution's output"
+  },
+  {
+    "label": "owner-queue shell: bare backticks",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      nested(src.slice(i + 1, end < 0 ? src.length : end))\n      hasWord = true\n      i = end < 0",
+    "replace": "      hasWord = true\n      i = end < 0"
+  },
+  {
+    "label": "owner-queue shell: comments",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (c === '#' && !hasWord) {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue shell: redirection targets dropped",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      else if (target === undefined) argv.push(word)",
+    "replace": "      else argv.push(word)"
+  },
+  {
+    "label": "owner-queue shell: heredocs read by a shell are commands",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "        if (sameLine.some(one => readsCommands(one))) nested(body)",
+    "replace": "        if (false) nested(body)"
+  },
+  {
+    "label": "owner-queue shell: a heredoc piped into a shell is commands",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "const sameLine = at < 0 ? [doc.argv] : out.slice(at)",
+    "replace": "const sameLine = [doc.argv]"
+  },
+  {
+    "label": "owner-queue shell: heredocs read as data are not commands",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "        if (sameLine.some(one => readsCommands(one))) nested(body)",
+    "replace": "        if (true) nested(body)"
+  },
+  {
+    "label": "owner-queue shell: substitutions in unquoted heredocs",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "        else if (!doc.isQuoted) for (const inner of substitutions(body)) nested(inner)",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: paths before program names",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  return word.slice(word.lastIndexOf('/') + 1)",
+    "replace": "  return word"
+  },
+  {
+    "label": "owner-queue shell: assignments before the program",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    while (rest.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nth(rest, 0))) rest = rest.slice(1)\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: wrappers unwrapped",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (wrapper !== undefined) {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue shell: timeout unwrapped",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  timeout: { values: ['-k', '--kill-after', '-s', '--signal'], skip: 1 },\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: keywords skipped",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "const KEYWORDS = new Set(['{', '!', 'then', 'do', 'else', ",
+    "replace": "const KEYWORDS = new Set(['{', "
+  },
+  {
+    "label": "owner-queue shell: bash -c",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      else if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) return",
+    "replace": "      else if (a === '-c') return"
+  },
+  {
+    "label": "owner-queue shell: bash -o takes a value",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (a === '-o' || a === '+o') i += 1\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: eval",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (name === 'eval') return [args.join(' ')]\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: script -c",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (name === 'script') {",
+    "replace": "  if (false) {"
+  },
+  {
+    "label": "owner-queue shell: ssh",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (name === 'ssh') {",
+    "replace": "  if (false) {"
+  },
+  {
+    "label": "owner-queue shell: watch",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (name === 'watch') {",
+    "replace": "  if (false) {"
+  },
+  {
+    "label": "owner-queue shell: xargs",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (name === 'xargs' || name === 'parallel') {",
+    "replace": "  if (false) {"
+  },
+  {
+    "label": "owner-queue: the guard covers every shell tool",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  on('tool.call', async ($, e, next) => {\n    const input",
+    "replace": "  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {\n    const input"
+  },
+  {
+    "label": "owner-queue: the guard denies, never runs",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "    return { deny: TEXT.held(what, item.id) }",
+    "replace": "    return next(e)"
+  },
+  {
+    "label": "owner-queue: the guard fails closed",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "(next.called ? next(e) : { deny: 'owner-queue: its guard failed, so the command is held.' })",
+    "replace": "next(e)"
+  },
+  {
+    "label": "owner-queue: a held command is queued",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "    const item = await add($, { command: input.command.trim(), why })",
+    "replace": "    const item = { id: 'x' }"
+  },
+  {
+    "label": "owner-queue: the description is the why",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "typeof input.description === 'string' && input.description !== '' ? input.description : what",
+    "replace": "what"
+  },
+  {
+    "label": "owner-queue: only the owner's origin ticks",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": " && OWNER_ORIGINS.has(origin)) {",
+    "replace": ") {"
+  },
+  {
+    "label": "owner-queue: only command rows tick",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (message.type === 'user' && e.door === 'command' && ",
+    "replace": "if (message.type === 'user' && "
+  },
+  {
+    "label": "owner-queue: only user rows tick",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (message.type === 'user' && e.door === 'command' && ",
+    "replace": "if (e.door !== 'x' && "
+  },
+  {
+    "label": "owner-queue: a failed run is not done",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "ran.code === 0 ? 'done' : 'failed'",
+    "replace": "'done'"
+  },
+  {
+    "label": "owner-queue: the session's title names who asked",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  const from = (await read($, title)) || ctx.from\n",
+    "replace": "  const from = ctx.from\n"
+  },
+  {
+    "label": "owner-queue: the queue folder is read on a timer",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "    $.clock.every(3000, () => void refresh($))\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: old files are pruned",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "    await prune($)\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: auto opens the pane",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  if (ctx.paneMode === 'auto') await showPane($)\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: no Copy while blocked",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "              {!isDone && first === undefined && (",
+    "replace": "              {!isDone && ("
+  },
+  {
+    "label": "owner-queue: Copy carries the marker",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "await $.ui.copy({ text: withMarker(item, nonce), surface: e.surface })",
+    "replace": "await $.ui.copy({ text: item.command, surface: e.surface })"
+  },
+  {
+    "label": "owner-queue: Remove removes",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "onPress={() => setStatus($, item, 'removed')}",
+    "replace": "onPress={() => undefined}"
+  },
+  {
+    "label": "owner-queue: the band hides while the pane shows",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (open.length === 0 || (await read($, isPaneShown))) return next(e)",
+    "replace": "if (open.length === 0) return next(e)"
+  },
+  {
+    "label": "owner-queue: a marker counts only on the last line",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  const last = (out[1] ?? '').replace(/\\s+$/, '').split('\\n').pop() ?? ''",
+    "replace": "  const last = (out[1] ?? '').replace(/\\s+$/, '').split('\\n').find(l => l.includes('oq:')) ?? ''"
+  },
+  {
+    "label": "owner-queue: a marker counts only in stdout",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "/<bash-stdout>([\\s\\S]*?)<\\/bash-stdout>/.exec(row)",
+    "replace": "/([\\s\\S]*)/.exec(row)"
+  },
+  {
+    "label": "owner-queue: the marker runs with pipefail",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "`(set -o pipefail; ${item.command}); echo",
+    "replace": "`${item.command}; echo"
+  },
+  {
+    "label": "owner-queue: a command with # gets no marker",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "!command.includes('#') && ",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: an item waits for the one before",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "first.status !== 'done' && first.status !== 'removed'",
+    "replace": "false"
+  },
+  {
+    "label": "owner-queue: old finished items leave the pane",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "now - one.updated < 3_600_000",
+    "replace": "true"
+  },
+  {
+    "label": "owner-queue: only finished items are stale",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "(one.status === 'removed' || one.status === 'done') && now - one.updated > 86_400_000",
+    "replace": "now - one.updated > 86_400_000"
+  },
+  {
+    "label": "owner-queue shell: an escaped backslash ends no line",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  const src = text\n",
+    "replace": "  const src = text.replace(/\\\\\\r?\\n/g, ' ')\n"
+  },
+  {
+    "label": "owner-queue shell: continuations inside double quotes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "        if (src[j] === '\\\\' && src[j + 1] === '\\n') {\n          j += 2\n        } else if",
+    "replace": "        if (false) {\n        } else if"
+  },
+  {
+    "label": "owner-queue shell: here-strings",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (src.startsWith('<<<', i)) {",
+    "replace": "      if (false) {"
+  },
+  {
+    "label": "owner-queue shell: a here-string into a shell is commands",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "for (const text of [...hereStrings, ...upstream.map(stdinText)])",
+    "replace": "for (const text of upstream.map(stdinText))"
+  },
+  {
+    "label": "owner-queue shell: a pipe into a shell is commands",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "for (const text of [...hereStrings, ...upstream.map(stdinText)])",
+    "replace": "for (const text of hereStrings)"
+  },
+  {
+    "label": "owner-queue shell: xargs adds what it reads",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "nested(`${inner} ${upstream.map(stdinText).join(' ')}`)",
+    "replace": "nested(inner)"
+  },
+  {
+    "label": "owner-queue shell: a pipeline carries every command before",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      upstream = isPiped ? [...upstream, argv] : []",
+    "replace": "      upstream = isPiped ? [argv] : []"
+  },
+  {
+    "label": "owner-queue shell: || ends a pipeline",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      const isOr = src[i + 1] === '|'",
+    "replace": "      const isOr = false"
+  },
+  {
+    "label": "owner-queue shell: \\n in a pipe is a newline",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  return unwrap(argv).slice(1).join(' ').replace(/\\\\n/g, '\\n')",
+    "replace": "  return unwrap(argv).slice(1).join(' ')"
+  },
+  {
+    "label": "owner-queue shell: closing() skips single quotes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    else if (c === \"'\") i = Math.max(i, src.indexOf(\"'\", i + 1))\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: closing() skips double quotes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    else if (c === '\"') i = closingQuote(src, i)\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: a substitution inside double quotes inside one",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    else if (src[j] === '$' && src[j + 1] === '(') j = closing(src, j + 1)\n    else if (src[j] === '\"') return j",
+    "replace": "    else if (src[j] === '\"') return j",
+    "redundant": "a $(…) cut short at a ) inside its quotes leaves the rest to the outer reading, which reads it as commands as well"
+  },
+  {
+    "label": "owner-queue shell: <<- heredocs",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (src[i] === '-') i += 1\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: too deep holds",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (depth > MAX_DEPTH) throw new TooDeep('nested too deeply')",
+    "replace": "  if (depth > MAX_DEPTH) return []"
+  },
+  {
+    "label": "owner-queue shell: if, elif keywords",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "'else', 'if', 'elif', ",
+    "replace": "'else', "
+  },
+  {
+    "label": "owner-queue shell: while, until keywords",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "'elif', 'while', 'until'])",
+    "replace": "'elif'])"
+  },
+  {
+    "label": "owner-queue shell: coproc",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (name === 'coproc') {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue shell: coproc NAME",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      rest = rest[2] === '{' ? rest.slice(2) : rest.slice(1)",
+    "replace": "      rest = rest.slice(1)"
+  },
+  {
+    "label": "owner-queue shell: function NAME",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (name === 'function') {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue shell: timeout options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  timeout: { values: ['-k', '--kill-after', '-s', '--signal'], skip: 1 },",
+    "replace": "  timeout: { values: [], skip: 1 },"
+  },
+  {
+    "label": "owner-queue shell: timeout skips its duration",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  timeout: { values: ['-k', '--kill-after', '-s', '--signal'], skip: 1 },",
+    "replace": "  timeout: { values: ['-k', '--kill-after', '-s', '--signal'] },"
+  },
+  {
+    "label": "owner-queue shell: env options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "const ENV_VALUES = ['-u', '--unset', '-C', '--chdir']",
+    "replace": "const ENV_VALUES: string[] = []"
+  },
+  {
+    "label": "owner-queue shell: env -S splits",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      const args = name === 'env' ? splitString(rest.slice(1)) : rest.slice(1)",
+    "replace": "      const args = rest.slice(1)"
+  },
+  {
+    "label": "owner-queue shell: env -S attached",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    const value = attached !== '' ? attached : nth(args, i + 1)",
+    "replace": "    const value = nth(args, i + 1)"
+  },
+  {
+    "label": "owner-queue shell: sudo options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    values: ['-u', '--user', '-g', '--group', '-C', '--close-from', '-D', '--chdir', ",
+    "replace": "    values: ['-u', '--user', "
+  },
+  {
+    "label": "owner-queue shell: doas",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  doas: { values: ['-u', '-C'] },\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: exec -a takes a value",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  exec: { values: ['-a'] },",
+    "replace": "  exec: { values: [] },"
+  },
+  {
+    "label": "owner-queue shell: time options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  time: { values: ['-f', '--format', '-o', '--output'] },",
+    "replace": "  time: { values: [] },"
+  },
+  {
+    "label": "owner-queue shell: nohup",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  nohup: { values: [] },\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: command",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  command: { values: [] },\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: command -v runs nothing",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(rest[1] ?? '')) return [] // command -v prints, runs nothing\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: nice options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  nice: { values: ['-n', '--adjustment'] },",
+    "replace": "  nice: { values: [] },"
+  },
+  {
+    "label": "owner-queue shell: ionice options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  ionice: { values: ['-c', '--class', '-n', '--classdata'] },",
+    "replace": "  ionice: { values: [] },"
+  },
+  {
+    "label": "owner-queue shell: chrt skips its priority",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "'--sched-deadline'], skip: 1 },",
+    "replace": "'--sched-deadline'] },"
+  },
+  {
+    "label": "owner-queue shell: taskset skips its mask",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  taskset: { values: [], skip: 1 },",
+    "replace": "  taskset: { values: [] },"
+  },
+  {
+    "label": "owner-queue shell: stdbuf options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  stdbuf: { values: ['-i', '--input', '-o', '--output', '-e', '--error'] },",
+    "replace": "  stdbuf: { values: [] },"
+  },
+  {
+    "label": "owner-queue shell: caffeinate options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  caffeinate: { values: ['-w', '-t'] },",
+    "replace": "  caffeinate: { values: [] },"
+  },
+  {
+    "label": "owner-queue shell: flock skips its file",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "'--conflict-exit-code'], skip: 1 },",
+    "replace": "'--conflict-exit-code'] },"
+  },
+  {
+    "label": "owner-queue shell: flock -c",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (name === 'flock' && (rest[0] === '-c' || rest[0] === '--command')) rest = ['sh', ...rest]\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: su -c",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (name === 'su') {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue shell: su reads its commands",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (at < 0) return ['sh'] // a shell that reads its commands from standard input",
+    "replace": "      if (at < 0) return rest"
+  },
+  {
+    "label": "owner-queue shell: direnv exec",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (name === 'direnv' && rest[1] === 'exec') {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue shell: aws-vault exec --",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      rest = end >= 0 ? rest.slice(end + 1) : afterOptions(",
+    "replace": "      rest = end >= 0 ? rest.slice(end) : afterOptions("
+  },
+  {
+    "label": "owner-queue shell: aws-vault exec PROFILE",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "'--region', '--prompt']).slice(1)",
+    "replace": "'--region', '--prompt'])"
+  },
+  {
+    "label": "owner-queue shell: a program handing to a shell reads commands",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  return depth < 2 && handedOver(argv).some(inner => commands(inner).some(one => readsCommands(one, depth + 1)))",
+    "replace": "  return false"
+  },
+  {
+    "label": "owner-queue shell: ssh reads commands",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (SHELLS.has(name) || name === 'ssh' || name === 'eval'",
+    "replace": "  if (SHELLS.has(name) || name === 'eval'"
+  },
+  {
+    "label": "owner-queue shell: find -exec",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (name === 'find') {",
+    "replace": "  if (false) {"
+  },
+  {
+    "label": "owner-queue shell: find -exec ends at ;",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      const end = args.findIndex((a, at) => at > i && (a === ';' || a === '+'))",
+    "replace": "      const end = args.findIndex((a, at) => at > i && a === ';')"
+  },
+  {
+    "label": "owner-queue shell: kubectl exec",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (name === 'kubectl' || name === 'oc') {",
+    "replace": "  if (false) {"
+  },
+  {
+    "label": "owner-queue shell: docker run and exec",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (['docker', 'podman', 'nerdctl', 'docker-compose'].includes(name)) {",
+    "replace": "  if (false) {"
+  },
+  {
+    "label": "owner-queue shell: docker compose",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (rest[0] === 'compose' || rest[0] === 'container') rest =",
+    "replace": "    if (false) rest ="
+  },
+  {
+    "label": "owner-queue shell: container options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "const CONTAINER_VALUES = ['-e', '--env', ",
+    "replace": "const CONTAINER_VALUES = ["
+  },
+  {
+    "label": "owner-queue shell: program images",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "{ terraform: 'terraform', opentofu",
+    "replace": "{ opentofu"
+  },
+  {
+    "label": "owner-queue shell: xargs short options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "const XARGS_VALUES = ['-n', '-P', '-I', '-L', '-s', '-d', '-E', '-a', ",
+    "replace": "const XARGS_VALUES = ["
+  },
+  {
+    "label": "owner-queue shell: xargs long options take values",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "'-a', '--max-args', ",
+    "replace": "'-a', "
+  },
+  {
+    "label": "owner-queue shell: own entries only",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined",
+    "replace": "  return table[key]"
+  },
+  {
+    "label": "owner-queue: too deep handing over holds",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "      if (depth >= 4) return TOO_DEEP\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: too deep reading holds",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (error instanceof TooDeep) return TOO_DEEP",
+    "replace": "    if (error instanceof TooDeep) return undefined"
+  },
+  {
+    "label": "owner-queue: a held program later in the words",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "rule(run, dirs, ctx) ?? later(run, dirs, ctx) ?? ",
+    "replace": "rule(run, dirs, ctx) ?? "
+  },
+  {
+    "label": "owner-queue: a held program by its bin path",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": " || (HELD_PROGRAMS.has(program(word)) && /(^|\\/)bin\\/[^/]+$/.test(word))",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: a path is not a program",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "/(^|\\/)bin\\/[^/]+$/.test(word)",
+    "replace": "true"
+  },
+  {
+    "label": "owner-queue: programs that only read words",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (ONLY_READS_WORDS.has(program(run[0]))) return undefined\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: cd moves the push",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (program(run[0]) === 'cd') dirs.push(",
+    "replace": "    if (false) dirs.push("
+  },
+  {
+    "label": "owner-queue: iac help passes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (args.some(a => a === '-help' || a === '--help' || a === '-h')) return undefined // prints the command's help\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: terragrunt apply-all and destroy-all",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": ", 'apply-all', 'destroy-all'])",
+    "replace": "])"
+  },
+  {
+    "label": "owner-queue: workspace delete held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (first === 'workspace' && second === 'delete') return 'infrastructure change'\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: make dry runs pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (args.some(a => MAKE_DRY_RUN.has(a))) return undefined // prints the recipes, runs none\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: make -j takes no target",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "const MAKE_VALUE_FLAGS = new Set(['-C',",
+    "replace": "const MAKE_VALUE_FLAGS = new Set(['-j', '-C',"
+  },
+  {
+    "label": "owner-queue: aws help as a value is held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (args[last] === 'help' && last > 0 && !(args[last - 1] ?? '-').startsWith('-')) return undefined",
+    "replace": "  if (args.includes('help')) return undefined"
+  },
+  {
+    "label": "owner-queue: eks update-kubeconfig passes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "\n  'eks update-kubeconfig',",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: s3 destination is not only the last",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "positional.slice(1).some(",
+    "replace": "positional.slice(-1).some("
+  },
+  {
+    "label": "owner-queue: s3 request-payer takes a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'--checksum-algorithm', '--request-payer', ",
+    "replace": "'--checksum-algorithm', "
+  },
+  {
+    "label": "owner-queue: gh --env takes a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'-e', '--env', '-o'",
+    "replace": "'-o'"
+  },
+  {
+    "label": "owner-queue: gh --org takes a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'-o', '--org', ",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: gh --ref takes a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'-r', '--ref',\n",
+    "replace": "\n"
+  },
+  {
+    "label": "owner-queue: gh help passes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (args.includes('--help') || args.includes('-h')) return undefined // prints the command's help\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: gh deploy keys held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (group === 'repo' && verb === 'deploy-key' && ['add', 'delete'].includes(object)) return 'GitHub repository settings'\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: gh api -fKEY=VALUE",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (/^-[fF]./.test(a)) field(a.slice(2))\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: gh api --field=",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (/^--(field|raw-field)=/.test(a)) field(a.slice(a.indexOf('=') + 1))\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: gh api --input=",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (a === '--input' || a.startsWith('--input=')) {",
+    "replace": "    else if (a === '--input') {"
+  },
+  {
+    "label": "owner-queue: graphql from a file held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "values.some(v => /\\bmutation\\b/.test(v) || /^query=@/.test(v))",
+    "replace": "values.some(v => /\\bmutation\\b/.test(v))"
+  },
+  {
+    "label": "owner-queue: graphql --input held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    const isWrite = hasInput || values",
+    "replace": "    const isWrite = values"
+  },
+  {
+    "label": "owner-queue: statuses and check runs held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|pages|statuses|check-runs)",
+    "replace": "|pages)"
+  },
+  {
+    "label": "owner-queue: deployment approvals and transfers held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|approve|pending_deployments|transfer)$/",
+    "replace": "|approve)$/"
+  },
+  {
+    "label": "owner-queue: deleting a comment passes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (method === 'DELETE' && COMMENT.test(endpoint)) return undefined\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: comment paths are whole",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "const COMMENT = /^\\/?repos\\/[^/]+\\/[^/]+\\/((pulls|issues)\\/)?comments",
+    "replace": "const COMMENT = /((pulls|issues)\\/)?comments"
+  },
+  {
+    "label": "owner-queue: merge paths are whole",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "const MERGE = /^\\/?repos\\/[^/]+\\/[^/]+\\/pulls",
+    "replace": "const MERGE = /\\/pulls"
+  },
+  {
+    "label": "owner-queue: push --all held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "a === '--all' || a === '--mirror' || a === '--branches'",
+    "replace": "a === '--mirror' || a === '--branches'"
+  },
+  {
+    "label": "owner-queue: push --branches held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "a === '--all' || a === '--mirror' || a === '--branches'",
+    "replace": "a === '--all' || a === '--mirror'"
+  },
+  {
+    "label": "owner-queue: push options take values",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "const PUSH_VALUE_OPTIONS = new Set(['-o', '--push-option', ",
+    "replace": "const PUSH_VALUE_OPTIONS = new Set(["
+  },
+  {
+    "label": "owner-queue: git -C names the folder",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (a === '-C') at = join(at, args[i + 1] ?? '')\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: git options take values",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (GIT_VALUE_OPTIONS.has(a)) i += 1\n    else if (!a.startsWith('-')) break",
+    "replace": "    if (!a.startsWith('-')) break"
+  },
+  {
+    "label": "owner-queue: a push of HEAD reads the branch",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (refs.length > 0 && !refs.some(r => r === 'HEAD' || r === '@')) return undefined",
+    "replace": "  if (refs.length > 0) return undefined"
+  },
+  {
+    "label": "owner-queue: an unread branch holds",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (!ctx.branches.has(key)) return 'push from a branch the guard could not read'",
+    "replace": "    else if (!ctx.branches.has(key)) return undefined"
+  },
+  {
+    "label": "owner-queue: the default branch holds",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (DEFAULT_BRANCH.test(ctx.branches.get(key) ?? '')) return",
+    "replace": "    else if (false) return"
+  },
+  {
+    "label": "owner-queue: an absolute folder is not joined",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (base === '' || dir.startsWith('/') || dir.startsWith('~')) return dir",
+    "replace": "  if (base === '') return dir"
+  },
+  {
+    "label": "owner-queue: . is the same folder",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (dir === '' || dir === '.') return base",
+    "replace": "  if (dir === '') return base"
+  },
+  {
+    "label": "owner-queue: claude plugins alias",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (first !== 'plugin' && first !== 'plugins') return undefined",
+    "replace": "  if (first !== 'plugin') return undefined"
+  },
+  {
+    "label": "owner-queue: CZW_SESSION names who asked",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "(await $.env.get('CZW_SESSION')) || ",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: the guard reads the current branch",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "heldReason(input.command, extra, await branches($, input.command))",
+    "replace": "heldReason(input.command, extra)"
+  },
+  {
+    "label": "owner-queue: the branch is read in the folder",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": ": `${cwd}/${dir}`",
+    "replace": ": dir"
+  },
+  {
+    "label": "owner-queue: a failed git read is no branch",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "      if (ran.exitCode === 0 && ran.stdout.trim() !== '')",
+    "replace": "      if (true)"
+  },
+  {
+    "label": "owner-queue: only the right nonce ticks",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (item !== undefined && item.nonce === ran.nonce) await",
+    "replace": "if (item !== undefined) await"
+  },
+  {
+    "label": "owner-queue: a tick spends the nonce",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "nonce: undefined, updated",
+    "replace": "updated"
+  },
+  {
+    "label": "owner-queue: Copy stores the nonce",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "                        await save($, { ...item, nonce })\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: odd ids are not read",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "      if (typeof item.id === 'string' && ID.test(item.id)) found.push(item) // an id names a file",
+    "replace": "      found.push(item)"
+  },
+  {
+    "label": "owner-queue: odd ids are not pruned",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": ".filter(one => ID.test(one.id))",
+    "replace": "",
+    "redundant": "load() drops an item whose id is not a plain word before prune sees it"
+  },
+  {
+    "label": "owner-queue: odd ids are not saved",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  if (!ID.test(item.id)) throw new Error(",
+    "replace": "  if (false) throw new Error(",
+    "redundant": "every item save() writes comes from load(), which drops odd ids, or from newId()"
+  },
+  {
+    "label": "owner-queue: a waiting command is queued once",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  if (same !== undefined) return same\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: the id retry",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  while (await $.fs.exists(`${ctx.dir}/${id}.json`)) id = newId(now, Math.random())\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: no Copy for a decision",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "                  {item.command !== '' && (\n                    <Button",
+    "replace": "                  {(\n                    <Button"
+  },
+  {
+    "label": "owner-queue: the pane redraws only on a change",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  if (JSON.stringify(before) !== JSON.stringify(now)) await update($, items, () => now)",
+    "replace": "  await update($, items, () => now)"
+  },
+  {
+    "label": "owner-queue: the marker carries the nonce",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "echo \"oq:${item.id}:${nonce}:$?\"",
+    "replace": "echo \"oq:${item.id}:$?\""
+  },
+  {
+    "label": "owner-queue: a marker needs a nonce",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "/^oq:([a-z0-9]+):([a-z0-9]+):(\\d+)$/",
+    "replace": "/^oq:([a-z0-9]+):([a-z0-9]*):?(\\d+)$/"
+  },
+  {
+    "label": "owner-queue: nonces are long",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "new Uint8Array(16)",
+    "replace": "new Uint8Array(4)"
+  },
+  {
+    "label": "owner-queue: ids are whole words",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "export const ID = /^[a-z0-9]+$/",
+    "replace": "export const ID = /[a-z0-9]+/"
+  },
+  {
+    "label": "owner-queue: a decision waits by its why",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "(fields.command !== '' || one.why === fields.why)",
+    "replace": "true"
   }
 ]
