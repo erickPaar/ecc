@@ -3,10 +3,11 @@
 // shows it with a Copy button; the marker in the copied command ticks the item when the owner runs
 // it with ! (those commands reach session.append, never tool.call, so the guard never holds them).
 import { atom, read, update } from 'claude-code'
-import type { Engine, Register } from 'claude-code'
+import type { EngineInterface as Engine, Register } from 'claude-code'
 
+import { pushDirs } from './guard'
 import type { Item } from './queue'
-import { blocker, heldReason, marker, newId, stale, TEXT, visible, withMarker } from './queue'
+import { blocker, heldReason, ID, marker, newId, newNonce, stale, TEXT, visible, waitingFor, withMarker } from './queue'
 
 const PANE = 'owner-queue'
 const QUEUE_TOOL = 'mcp__owner-queue__ask_owner_to_run'
@@ -14,8 +15,13 @@ const items = atom({ plugin: 'owner-queue', key: 'items' } as const, [] as Item[
 const isPaneShown = atom({ plugin: 'owner-queue', key: 'isPaneShown' } as const, false)
 const title = atom({ plugin: 'owner-queue', key: 'title' } as const, '')
 
-// The origins a person's own ! command row carries (a probe on 13/10 saw `unclassified`); a peer
-// session, a plugin or a remote bridge never ticks an item.
+// The origins a person's own ! command row may carry. What is known: the types name `composer` the
+// person's own gesture at the terminal, as the engine stamps it; a probe on this build saw a
+// person's ! command row arrive as `unclassified`, which the types call a row with no provenance
+// the engine can name. So `unclassified` is what lets a ! row tick, and it does not tell the
+// person's ! from another unstamped row: the nonce in the marker (withMarker) is what stops a
+// forged one. A peer session, a plugin or a remote bridge carries an origin of its own and never
+// ticks an item.
 const OWNER_ORIGINS = new Set(['unclassified', 'composer'])
 
 // Set by register and session.start; a reload runs both again.
@@ -32,7 +38,8 @@ async function load($: Engine, dir: string): Promise<Item[]> {
   for (const entry of entries) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
     try {
-      found.push(JSON.parse(await $.fs.read(`${dir}/${entry.name}`)) as Item)
+      const item = JSON.parse(await $.fs.read(`${dir}/${entry.name}`)) as Item
+      if (typeof item.id === 'string' && ID.test(item.id)) found.push(item) // an id names a file
     } catch {
       // A file another session is writing right now: the next refresh reads it.
     }
@@ -42,6 +49,7 @@ async function load($: Engine, dir: string): Promise<Item[]> {
 
 async function save($: Engine, item: Item): Promise<void> {
   if (ctx.dir === '') throw new Error('owner-queue: the queue folder is not known yet')
+  if (!ID.test(item.id)) throw new Error(`owner-queue: ${JSON.stringify(item.id)} is not an item id`)
   await $.fs.write(`${ctx.dir}/${item.id}.json`, JSON.stringify(item, null, 2))
 }
 
@@ -53,7 +61,10 @@ async function refresh($: Engine): Promise<Item[]> {
   return now
 }
 
+// Queues a command, or answers with the item already waiting for it.
 async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after'>): Promise<Item> {
+  const same = waitingFor(await load($, ctx.dir), fields)
+  if (same !== undefined) return same
   const now = await $.clock.now()
   const from = (await read($, title)) || ctx.from
   let id = newId(now, Math.random())
@@ -66,7 +77,7 @@ async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after'>): 
 }
 
 async function setStatus($: Engine, item: Item, status: Item['status'], code?: number): Promise<void> {
-  await save($, { ...item, status, code, updated: await $.clock.now() })
+  await save($, { ...item, status, code, nonce: undefined, updated: await $.clock.now() }) // a tick spends the nonce
   await refresh($)
 }
 
@@ -77,8 +88,28 @@ async function showPane($: Engine): Promise<void> {
 
 // Deletes the files of items removed or done more than a day ago.
 async function prune($: Engine): Promise<void> {
-  const old = stale(await load($, ctx.dir), await $.clock.now())
+  const old = stale(await load($, ctx.dir), await $.clock.now()).filter(one => ID.test(one.id))
   if (old.length > 0) await $.process.run(['rm', '-f', ...old.map(one => `${ctx.dir}/${one.id}.json`)])
+}
+
+// The current branch of each folder a push in this command needs (guard.ts), read with git. A
+// folder git cannot read is left out, and the guard holds its push.
+async function branches($: Engine, command: string): Promise<Map<string, string>> {
+  const found = new Map<string, string>()
+  const dirs = pushDirs(command)
+  if (dirs.length === 0) return found
+  const cwd = await $.session.cwd()
+  const home = (await $.env.get('HOME')) ?? ''
+  for (const dir of dirs) {
+    const path = dir === '' ? cwd : dir.startsWith('/') ? dir : dir === '~' || dir.startsWith('~/') ? home + dir.slice(1) : `${cwd}/${dir}`
+    try {
+      const ran = await $.process.run(['git', '-C', path, 'rev-parse', '--abbrev-ref', 'HEAD'])
+      if (ran.exitCode === 0 && ran.stdout.trim() !== '') found.set(dir, ran.stdout.trim())
+    } catch {
+      // Left out: the push is held.
+    }
+  }
+  return found
 }
 
 export const register: Register = (on, options) => {
@@ -87,7 +118,9 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     ctx.dir = await folder($, (options.dir as string) ?? '')
-    ctx.from = e.cwd.split('/').pop() ?? ctx.from
+    // Who asked, when the session has no title: the name czw gives each session it starts, else the
+    // folder's name.
+    ctx.from = (await $.env.get('CZW_SESSION')) || (e.cwd.split('/').pop() ?? ctx.from)
     await $.process.run(['mkdir', '-p', ctx.dir])
     await $.command.register({ name: 'queue', description: 'Show the queue of commands only you run' })
     await $.tool.register({
@@ -112,7 +145,8 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // The session's title, when the session has one (czw starts each with its name). Kept in state,
+  // The session's title, when the engine passes it: it names who asked before CZW_SESSION and the
+  // folder. On this build the event does not reach a mod installed at user level. Kept in state,
   // because this event fires once and a reload would otherwise lose it.
   on('classic.SessionStart', async ($, e, next) => {
     if (typeof e.session_title === 'string' && e.session_title !== '') {
@@ -137,11 +171,11 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as { tool: string; command?: unknown; description?: unknown }
     if (input.tool === QUEUE_TOOL || typeof input.command !== 'string') return next(e)
-    const what = heldReason(input.command, extra)
+    const what = heldReason(input.command, extra, await branches($, input.command))
     if (what === undefined) return next(e)
     const why = typeof input.description === 'string' && input.description !== '' ? input.description : what
     const item = await add($, { command: input.command.trim(), why })
-    $.ui.toast(TEXT.held(what, item.id).split(':')[0])
+    $.ui.toast(TEXT.held(what, item.id).split(':')[0] ?? what)
     return { deny: TEXT.held(what, item.id) }
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'owner-queue: its guard failed, so the command is held.' }))
 
@@ -153,7 +187,7 @@ export const register: Register = (on, options) => {
       const ran = marker((message.content ?? []).map(part => part.text ?? '').join('\n'))
       if (ran !== undefined) {
         const item = (await load($, ctx.dir)).find(one => one.id === ran.id)
-        if (item !== undefined) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', ran.code)
+        if (item !== undefined && item.nonce === ran.nonce) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', ran.code)
       }
     }
     return next(e)
@@ -197,7 +231,10 @@ export const register: Register = (on, options) => {
                       key={`copy-${item.id}`}
                       label={TEXT.copy}
                       onPress={async () => {
-                        await $.ui.copy({ text: withMarker(item), surface: e.surface })
+                        // The nonce is in the item before it is on the clipboard, so a quick run ticks.
+                        const nonce = newNonce()
+                        await save($, { ...item, nonce })
+                        await $.ui.copy({ text: withMarker(item, nonce), surface: e.surface })
                         $.ui.toast(TEXT.copied)
                       }}
                     />

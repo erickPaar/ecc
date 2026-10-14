@@ -8,10 +8,12 @@ export type { Item }
 export { heldReason } from './guard'
 
 // The text Copy puts on the clipboard: the command in a subshell with pipefail, so a failure
-// anywhere in a pipeline counts, then a marker that prints its exit code. A command a marker would
-// break (a comment, several lines, a trailing & or ;) gets none and is ticked by hand.
-export function withMarker(item: Pick<Item, 'id' | 'command'>): string {
-  return canMark(item.command) ? `(set -o pipefail; ${item.command}); echo "oq:${item.id}:$?"` : item.command
+// anywhere in a pipeline counts, then a marker that prints its exit code. The marker carries a
+// nonce made at that Copy, which no tool result or message to the model holds, so a command whose
+// last line the model controls cannot tick another item. A command a marker would break (a
+// comment, several lines, a trailing & or ;) gets none and is ticked by hand.
+export function withMarker(item: Pick<Item, 'id' | 'command'>, nonce: string): string {
+  return canMark(item.command) ? `(set -o pipefail; ${item.command}); echo "oq:${item.id}:${nonce}:$?"` : item.command
 }
 
 export function canMark(command: string): boolean {
@@ -20,12 +22,27 @@ export function canMark(command: string): boolean {
 
 // The marker of a ! command's output: the last line of its standard output, and only that line,
 // so a marker merely printed by the command (or quoted in a message) ticks nothing.
-export function marker(row: string): { id: string; code: number } | undefined {
+export function marker(row: string): { id: string; nonce: string; code: number } | undefined {
   const out = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/.exec(row)
   if (out === null) return undefined
-  const last = out[1].replace(/\s+$/, '').split('\n').pop() ?? ''
-  const m = /^oq:([a-z0-9]+):(\d+)$/.exec(last)
-  return m === null ? undefined : { id: m[1], code: Number(m[2]) }
+  const last = (out[1] ?? '').replace(/\s+$/, '').split('\n').pop() ?? ''
+  const [, id, nonce, code] = /^oq:([a-z0-9]+):([a-z0-9]+):(\d+)$/.exec(last) ?? []
+  return id === undefined || nonce === undefined ? undefined : { id, nonce, code: Number(code) }
+}
+
+// Item ids and nonces are base-36 words: an id read from a file names a file in the queue folder.
+export const ID = /^[a-z0-9]+$/
+
+// Sixteen random base-36 characters, from the host's cryptographic random source.
+export function newNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return [...bytes].map(b => (b % 36).toString(36)).join('')
+}
+
+// The item already waiting for the same command (or, for a decision, the same why), so asking twice
+// queues once.
+export function waitingFor(items: readonly Item[], fields: Pick<Item, 'command' | 'why'>): Item | undefined {
+  return items.find(one => one.status === 'waiting' && one.command === fields.command && (fields.command !== '' || one.why === fields.why))
 }
 
 // The item that must be done before this one, while it is not done yet.

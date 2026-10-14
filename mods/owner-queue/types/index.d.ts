@@ -3,12 +3,13 @@ export type Status = 'waiting' | 'done' | 'failed' | 'removed'
 
 export type Item = {
   id: string
-  command: string // empty for a decision that has no command ("approve PR 116")
+  command: string // empty for a decision that has no command ("approve the release")
   why: string
   from: string // the session that asked
   after?: string // the id of the item that must be done first
   status: Status
   code?: number // the exit code the marker reported
+  nonce?: string // made at the last Copy, spent by the tick; only a marker carrying it ticks
   created: number
   updated: number
 }

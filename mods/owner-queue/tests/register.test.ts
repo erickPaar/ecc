@@ -7,19 +7,28 @@ const DIR = '/q'
 const OPTIONS = { dir: DIR, pane: 'off' }
 const AUTO = { dir: DIR, pane: 'auto' }
 
-type World = { files: Map<string, string>; copied: string[]; opened: string[] }
+type World = { files: Map<string, string>; copied: string[]; opened: string[]; ran: string[][]; checked: string[] }
+type Setup = { isFull?: boolean; isPlaced?: boolean; branch?: string; env?: Record<string, string>; taken?: number }
 
 // A folder in memory beneath the plugin: what $.fs and $.process.run reach in a session, and the
-// rest of what the plugin asks of a session, answered plainly.
-function world(on: On, isFull = false, isPlaced = false): World {
+// rest of what the plugin asks of a session, answered plainly. `branch` is what git reads as the
+// current branch; without one, git fails. The first `taken` item files asked about exist.
+function world(on: On, { isFull = false, isPlaced = false, branch, env = {}, taken = 0 }: Setup = {}): World {
+  mock.env(on, env)
   const files = new Map<string, string>()
+  const ran: string[][] = []
+  const checked: string[] = []
   const copied: string[] = []
   const opened: string[] = []
-  on('fs.exists', (_$, e) => ({ value: [...files.keys()].some(path => path.startsWith(e.path)) }))
+  on('fs.exists', (_$, e) => {
+    if (e.path.endsWith('.json')) checked.push(e.path)
+    if (e.path.endsWith('.json') && checked.length <= taken) return { value: true }
+    return { value: [...files.keys()].some(path => path.startsWith(e.path)) }
+  })
   on('fs.list', (_$, e) => ({
     value: [...files.keys()]
       .filter(path => path.startsWith(`${e.path}/`))
-      .map(path => ({ name: path.slice(e.path!.length + 1), kind: 'file' as const, size: files.get(path)!.length })),
+      .map(path => ({ name: path.slice(e.path!.length + 1), kind: 'file' as const, size: files.get(path)!.length, mtimeMs: 0, isLink: false })),
   }))
   on('fs.read', (_$, e) => ({ value: files.get(e.path) ?? '' }) as never)
   on('fs.write', (_$, e) => {
@@ -28,9 +37,12 @@ function world(on: On, isFull = false, isPlaced = false): World {
     return { value: undefined } as never
   })
   on('process.run', (_$, e) => {
+    ran.push([...e.argv])
     if (e.argv[0] === 'rm') for (const path of e.argv.slice(2)) files.delete(path)
+    if (e.argv[0] === 'git') return { value: branch === undefined ? { exitCode: 128, stdout: '', stderr: 'not a repository' } : { exitCode: 0, stdout: `${branch}\n`, stderr: '' } } as never
     return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
   })
+  on('session.cwd', () => ({ value: '/home/x/projects/my-api' }) as never)
   on('session.start', (_$, e) => ({ cwd: e.cwd }) as never)
   on('classic.SessionStart', () => ({}) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
@@ -46,11 +58,18 @@ function world(on: On, isFull = false, isPlaced = false): World {
     opened.push(e.id)
     return { value: { isPlaced } } as never
   })
-  return { files, copied, opened }
+  return { files, copied, opened, ran, checked }
 }
 
 function queued(w: World): Item[] {
   return [...w.files.values()].map(text => JSON.parse(text) as Item).sort((a, b) => a.created - b.created)
+}
+
+// The queue's item at this place, oldest first; a test that finds none fails.
+function nth(w: World, at = 0): Item {
+  const one = queued(w)[at]
+  if (one === undefined) throw new Error(`no item ${at} in the queue`)
+  return one
 }
 
 type Dollar = Parameters<Parameters<typeof test>[2] & Function>[0]
@@ -77,6 +96,13 @@ async function pane($: Dollar) {
   return JSON.stringify(await $.ui.render({ component: 'Pane', requestId: 'owner-queue', surface: 'terminal', props: {} } as never))
 }
 
+// Presses Copy on an item and answers the marker's nonce, as the owner's clipboard holds it.
+async function copy($: Dollar, w: World, id: string): Promise<string> {
+  await pane($)
+  await $.ui.press({ plugin: 'owner-queue', key: `copy-${id}` })
+  return /:([a-z0-9]+):\$\?"$/.exec(w.copied[w.copied.length - 1] ?? '')?.[1] ?? ''
+}
+
 describe('the guard', () => {
   test('holds an apply from the model and puts it in the queue', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: 1000 })
@@ -85,7 +111,7 @@ describe('the guard', () => {
     await start($)
     const ran = await $.tool.call({ tool: 'Bash', command: 'make apply STACK=app ENV=dev' } as never)
     expect(String(ran.deny)).toContain('only the owner runs it')
-    const [held] = queued(w)
+    const held = nth(w)
     expect(held).toMatchObject({ command: 'make apply STACK=app ENV=dev', status: 'waiting', from: 'my-api' })
   })
 
@@ -93,8 +119,8 @@ describe('the guard', () => {
     mock.clock(on)
     const w = world(on)
     await start($)
-    await $.tool.call({ tool: 'Bash', command: 'tofu apply', description: 'Apply the agent stack' } as never)
-    expect(queued(w)[0].why).toBe('Apply the agent stack')
+    await $.tool.call({ tool: 'Bash', command: 'tofu apply', description: 'Apply the network stack' } as never)
+    expect(nth(w).why).toBe('Apply the network stack')
   })
 
   test('guards every tool that runs a shell command, Monitor included', { options: OPTIONS }, async ($, on) => {
@@ -119,7 +145,7 @@ describe('the guard', () => {
 
   test('when the queue cannot be written, the held command is still refused', { options: OPTIONS }, async ($, on) => {
     mock.clock(on)
-    world(on, true)
+    world(on, { isFull: true })
     on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
     await start($)
     const ran = await $.tool.call({ tool: 'Bash', command: 'tofu apply' } as never)
@@ -127,14 +153,119 @@ describe('the guard', () => {
   })
 })
 
-describe('who asked', () => {
-  test('an item names the session by its title when it has one', { options: OPTIONS }, async ($, on) => {
+describe('the guard reads', () => {
+  test('a push with no refspec holds on the default branch, read with git in the session\'s folder', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on, { branch: 'main' })
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    const ran = await $.tool.call({ tool: 'Bash', command: 'git push' } as never)
+    expect(String(ran.deny)).toContain('push to the default branch')
+    expect(w.ran).toContainEqual(['git', '-C', '/home/x/projects/my-api', 'rev-parse', '--abbrev-ref', 'HEAD'])
+  })
+
+  test('a push with no refspec passes on another branch', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on, { branch: 'feat/x' })
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    expect((await $.tool.call({ tool: 'Bash', command: 'git -C sub push' } as never)).deny).toBeUndefined()
+    expect(w.ran).toContainEqual(['git', '-C', '/home/x/projects/my-api/sub', 'rev-parse', '--abbrev-ref', 'HEAD'])
+  })
+
+  test('a push whose branch git cannot read is held', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on)
+    world(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    expect(String((await $.tool.call({ tool: 'Bash', command: 'git push origin HEAD' } as never)).deny)).toContain('could not read')
+  })
+
+  test('the held setting holds more', { options: { ...OPTIONS, held: 'kubectl\\s+delete' } }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    expect(String((await $.tool.call({ tool: 'Bash', command: 'kubectl delete pod x' } as never)).deny)).toContain('held by your settings')
+    expect((await $.tool.call({ tool: 'Bash', command: 'kubectl get pods' } as never)).deny).toBeUndefined()
+    expect(queued(w)).toHaveLength(1)
+  })
+})
+
+describe('the queue', () => {
+  test('asking again for a command that waits answers with the same item', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: 5000 })
     const w = world(on)
     await start($)
-    await $.classic.SessionStart({ source: 'resume', session_title: 'pi-service' } as never)
+    const first = await ask($, 'tofu apply')
+    await $.tool.call({ tool: 'Bash', command: 'tofu apply' } as never)
+    const again = await ask($, 'tofu apply')
+    expect(queued(w)).toHaveLength(1)
+    expect(String(again.result)).toBe(String(first.result))
+  })
+
+  test('a second id is drawn when the first one\'s file exists', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { taken: 1 })
+    await start($)
     await ask($, 'tofu apply')
-    expect(queued(w)[0].from).toBe('pi-service')
+    const item = nth(w)
+    expect(w.checked).toHaveLength(2)
+    expect(w.checked[0]).not.toBe(`${DIR}/${item.id}.json`)
+    expect(w.checked[1]).toBe(`${DIR}/${item.id}.json`)
+  })
+
+  test('a file whose id is not a plain word is never read, written or deleted', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 300_000_000 })
+    const w = world(on)
+    const odd: Item = { id: '../../x', command: 'tofu apply', why: 'odd one', from: 's', status: 'waiting', created: 1, updated: 1 }
+    w.files.set(`${DIR}/odd.json`, JSON.stringify(odd))
+    w.files.set(`${DIR}/old.json`, JSON.stringify({ ...odd, id: '../old', status: 'done' }))
+    await start($)
+    expect(w.ran.some(argv => argv[0] === 'rm')).toBe(false)
+    expect(await pane($)).not.toContain('odd one')
+  })
+
+  test('the queue is drawn again only when it changed', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: 5000 })
+    world(on)
+    let writes = 0
+    on('state.set', (_$, e, next) => {
+      if ((e as { key?: string }).key === 'items') writes += 1
+      return next(e)
+    })
+    await start($)
+    await ask($, 'tofu apply')
+    const before = writes
+    await clock.advance(9000)
+    expect(writes).toBe(before)
+  })
+})
+
+describe('who asked', () => {
+  test('an item names the session by its title when the engine passes it', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'workspace-pane' } })
+    await start($)
+    await $.classic.SessionStart({ source: 'resume', session_title: 'review-session' } as never)
+    await ask($, 'tofu apply')
+    expect(nth(w).from).toBe('review-session')
+  })
+
+  test('else by the name czw gave the session', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'workspace-pane' } })
+    await start($)
+    await ask($, 'tofu apply')
+    expect(nth(w).from).toBe('workspace-pane')
+  })
+
+  test('else by its folder', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'tofu apply')
+    expect(nth(w).from).toBe('my-api')
   })
 })
 
@@ -144,19 +275,66 @@ describe('the tick', () => {
     const w = world(on)
     await start($)
     const asked = await ask($, 'make apply STACK=network')
-    const [item] = queued(w)
+    const item = nth(w)
     expect(String(asked.result)).toContain(item.id)
-    await row($, `<bash-stdout>Apply complete!\noq:${item.id}:0</bash-stdout><bash-stderr></bash-stderr>`)
-    expect(queued(w)[0].status).toBe('done')
+    const nonce = await copy($, w, item.id)
+    await row($, `<bash-stdout>Apply complete!\noq:${item.id}:${nonce}:0</bash-stdout><bash-stderr></bash-stderr>`)
+    expect(nth(w).status).toBe('done')
   })
 
   test('a failed run is marked failed with its exit code', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: 5000 })
     const w = world(on)
     await start($)
-    await ask($, 'make apply STACK=content')
-    await row($, `<bash-stdout>oq:${queued(w)[0].id}:2</bash-stdout>`)
-    expect(queued(w)[0]).toMatchObject({ status: 'failed', code: 2 })
+    await ask($, 'make apply STACK=storage')
+    const nonce = await copy($, w, nth(w).id)
+    await row($, `<bash-stdout>oq:${nth(w).id}:${nonce}:2</bash-stdout>`)
+    expect(nth(w)).toMatchObject({ status: 'failed', code: 2 })
+  })
+
+  test('the nonce is made at Copy and is in no tool result or refusal the model sees', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    await $.tool.call({ tool: 'Bash', command: 'tofu destroy' } as never)
+    expect(queued(w).every(one => one.nonce === undefined)).toBe(true)
+    for (const one of queued(w)) await copy($, w, one.id)
+    const nonces = queued(w).map(one => one.nonce ?? '')
+    expect(nonces.every(n => n.length === 16)).toBe(true)
+    // Asked again, each answers with the item that waits: its id, never its nonce.
+    const seen = [await ask($, 'make apply STACK=network'), await $.tool.call({ tool: 'Bash', command: 'tofu destroy' } as never)]
+    for (const n of nonces) expect(JSON.stringify(seen)).not.toContain(n)
+    expect(JSON.stringify(seen)).toContain(nth(w).id)
+  })
+
+  test('a queued command cannot forge another item\'s tick', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    const victim = nth(w)
+    await copy($, w, victim.id)
+    // The forged command prints the victim's old-style marker, then kills its shell before its own.
+    await ask($, `echo oq:${victim.id}:0; echo oq:${victim.id}:guess:0; kill -9 $$`)
+    const forger = queued(w).find(one => one.id !== victim.id)!
+    await copy($, w, forger.id)
+    await row($, `<bash-stdout>oq:${victim.id}:0</bash-stdout>`)
+    await row($, `<bash-stdout>oq:${victim.id}:0\noq:${victim.id}:guess:0</bash-stdout>`)
+    expect(queued(w).find(one => one.id === victim.id)?.status).toBe('waiting')
+  })
+
+  test('a tick spends the nonce, so a marker seen once never ticks again', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    const item = nth(w)
+    const nonce = await copy($, w, item.id)
+    await row($, `<bash-stdout>oq:${item.id}:${nonce}:1</bash-stdout>`)
+    await row($, `<bash-stdout>oq:${item.id}:${nonce}:0</bash-stdout>`)
+    expect(nth(w)).toMatchObject({ status: 'failed', code: 1 })
+    expect(nth(w).nonce).toBeUndefined()
   })
 
   for (const [name, fields] of [
@@ -170,8 +348,9 @@ describe('the tick', () => {
       const w = world(on)
       await start($)
       await ask($, 'make apply STACK=app')
-      await row($, `<bash-stdout>oq:${queued(w)[0].id}:0</bash-stdout>`, fields)
-      expect(queued(w)[0].status).toBe('waiting')
+      const nonce = await copy($, w, nth(w).id)
+      await row($, `<bash-stdout>oq:${nth(w).id}:${nonce}:0</bash-stdout>`, fields)
+      expect(nth(w).status).toBe('waiting')
     })
   }
 })
@@ -182,10 +361,22 @@ describe('the pane', () => {
     const w = world(on)
     await start($)
     await ask($, 'make apply STACK=network')
-    const [item] = queued(w)
+    const item = nth(w)
     await pane($)
     await $.ui.press({ plugin: 'owner-queue', key: `copy-${item.id}` })
-    expect(w.copied).toEqual([`(set -o pipefail; make apply STACK=network); echo "oq:${item.id}:$?"`])
+    const { nonce } = nth(w)
+    expect(w.copied).toEqual([`(set -o pipefail; make apply STACK=network); echo "oq:${item.id}:${nonce}:$?"`])
+  })
+
+  test('a decision with no command has Done and Remove, and no Copy', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, '')
+    const item = nth(w)
+    const drawn = await pane($)
+    expect(drawn).toContain(`done-${item.id}`)
+    expect(drawn).not.toContain(`copy-${item.id}`)
   })
 
   test('an item that waits for another has no buttons until that one is done', { options: OPTIONS }, async ($, on) => {
@@ -193,8 +384,8 @@ describe('the pane', () => {
     const w = world(on)
     await start($)
     await ask($, 'make apply STACK=network')
-    const [first] = queued(w)
-    await ask($, 'make apply STACK=content', first.id)
+    const first = nth(w)
+    await ask($, 'make apply STACK=storage', first.id)
     const second = queued(w).find(one => one.id !== first.id)!
     const drawn = await pane($)
     expect(drawn).toContain(`copy-${first.id}`)
@@ -210,7 +401,7 @@ describe('the pane', () => {
     await start($)
     await ask($, 'make apply STACK=network')
     await ask($, 'echo hi # a comment')
-    const [a, b] = queued(w)
+    const [a, b] = [nth(w, 0), nth(w, 1)]
     const drawn = await pane($)
     for (const id of [a.id, b.id]) {
       expect(drawn).toContain(`done-${id}`)
@@ -226,7 +417,7 @@ describe('the pane', () => {
 
   test('auto opens the pane when something is queued', { options: AUTO }, async ($, on) => {
     mock.clock(on)
-    const w = world(on, false, true)
+    const w = world(on, { isPlaced: true })
     await start($)
     expect(w.opened).toEqual([])
     await ask($, 'tofu apply')
@@ -235,7 +426,7 @@ describe('the pane', () => {
 
   test('the band shows only while the pane is not shown', { options: AUTO }, async ($, on) => {
     mock.clock(on)
-    world(on, false, false)
+    world(on)
     await start($)
     await ask($, 'tofu apply')
     const band = JSON.stringify(await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', props: {} } as never))
@@ -244,7 +435,7 @@ describe('the pane', () => {
 
   test('the band stays out of the way while the pane is shown', { options: AUTO }, async ($, on) => {
     mock.clock(on)
-    world(on, false, true)
+    world(on, { isPlaced: true })
     await start($)
     await ask($, 'tofu apply')
     const band = JSON.stringify(await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', props: {} } as never))
@@ -257,7 +448,7 @@ describe('upkeep', () => {
     const clock = mock.clock(on, { now: 5000 })
     const w = world(on)
     await start($)
-    const other: Item = { id: 'other1', command: 'tofu apply', why: 'from elsewhere', from: 'pi-content', status: 'waiting', created: 6000, updated: 6000 }
+    const other: Item = { id: 'other1', command: 'tofu apply', why: 'from elsewhere', from: 'other-session', status: 'waiting', created: 6000, updated: 6000 }
     w.files.set(`${DIR}/other1.json`, JSON.stringify(other))
     await clock.advance(3000)
     expect(await pane($)).toContain('from elsewhere')
