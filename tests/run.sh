@@ -39,6 +39,48 @@ check "gateguard: rm -rf denied first"        deny  "$(gate 'rm -rf build' s1)"
 check "gateguard: rm -rf allowed on retry"    allow "$(gate 'rm -rf build' s1)"
 check "gateguard: git push --force denied"    deny  "$(gate 'git push --force origin main' s1)"
 check "gateguard: routine command passes"     allow "$(gate 'ls -la' s2)"
+reason=$(bash_input 'rm -rf dist' s3 | "$ROOT/bin/node-run" "$ROOT/bin/run-hook.js" "$ROOT/scripts/hooks/gateguard-fact-force.js" | jq -r .hookSpecificOutput.permissionDecisionReason)
+check "gateguard: asks for the exact same retry" yes "$([[ $reason == *"exact same command"* ]] && echo yes || echo no)"
+
+# An rm inside the session's own scratchpad passes; the input is a subagent's, which shares the session_id.
+PAD_SID=pad-$$; PADS=$(cd /tmp && pwd -P)/claude-$(id -u)/-ecc-tests-$$
+SP=$PADS/$PAD_SID/scratchpad; OTHER=$PADS/other-$$/scratchpad; OUT=$(mktemp -d)
+mkdir -p "$SP/clone" "$SP/sub" "$SP/l*" "$OTHER/clone" "$OUT/inner"; ln -s "$OUT" "$SP/link-out"
+# Node is pinned: with HOME changed, node-run could miss it and skip the hook, which reads as allow.
+PAD_NODE=$("$ROOT/bin/node-run" -e 'process.stdout.write(process.execPath)')
+pad() { decision "$(jq -cn --arg c "$1" --arg s "${3:-$PAD_SID}" --arg d "${2:-/}" \
+  '{session_id: $s, agent_id: "a1", agent_type: "independent-reviewer", cwd: $d, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}' \
+  | ECC_NODE=$PAD_NODE "$ROOT/bin/node-run" "$ROOT/bin/run-hook.js" "$ROOT/scripts/hooks/gateguard-fact-force.js")"; }
+check "scratchpad: rm -rf inside passes"             allow "$(pad "rm -rf $SP/clone")"
+check "scratchpad: several paths and flags pass"     allow "$(pad "rm -r -f -- $SP/clone '$SP/log one.txt' && ls -A $SP")"
+check "scratchpad: relative to the hook's cwd"       allow "$(pad 'rm -rf clone sub' "$SP")"
+check "scratchpad: cd into it, then rm"              allow "$(pad "cd $SP && rm -rf clone")"
+check "scratchpad: a glob at its root"               allow "$(pad "rm -rf $SP/*")"
+check "scratchpad: a symlink itself is removed"      allow "$(pad "rm -rf $SP/link-out")"
+check "scratchpad: ~ resolves to HOME"               allow "$(HOME=$SP pad 'rm -rf ~/clone')"
+check "scratchpad: the scratchpad itself"            deny  "$(pad "rm -rf $SP")"
+check "scratchpad: the scratchpad with a slash"      deny  "$(pad "rm -rf $SP/")"
+check "scratchpad: another session's scratchpad"     deny  "$(pad "rm -rf $OTHER/clone")"
+check "scratchpad: same path, another session"       deny  "$(pad "rm -rf $SP/sub" / other-$$)"
+check "scratchpad: a .. escape"                      deny  "$(pad "rm -rf $SP/../clone")"
+check "scratchpad: through a symlink outside"        deny  "$(pad "rm -rf $SP/link-out/inner")"
+check "scratchpad: a symlink with a slash follows"   deny  "$(pad "rm -rf $SP/link-out/")"
+check "scratchpad: \$HOME is not resolved"           deny  "$(pad 'rm -rf $HOME/x')"
+check "scratchpad: a bare \$VAR from inside it"       deny  "$(pad 'rm -rf $HOME' "$SP")"
+check "scratchpad: a \$VAR in double quotes"          deny  "$(pad 'rm -rf "$HOME"' "$SP")"
+check "scratchpad: ~ that is the scratchpad"         deny  "$(HOME=$SP pad 'rm -rf ~')"
+check "scratchpad: \$(...) is not resolved"          deny  "$(pad "rm -rf $SP/\$(echo clone)")"
+check "scratchpad: one path outside in the list"     deny  "$(pad "rm -rf $SP/clone $OUT/inner")"
+check "scratchpad: cd elsewhere, then rm"            deny  "$(pad 'cd /tmp && rm -rf clone' "$SP")"
+check "scratchpad: after ; a cd may have failed"     deny  "$(pad "cd $SP; rm -rf clone")"
+check "scratchpad: after ; a cd may have worked"     deny  "$(pad 'cd /tmp; rm -rf clone' "$SP")"
+check "scratchpad: a glob above the last part"       deny  "$(pad "rm -rf $SP/l*/inner")"
+check "scratchpad: a dot glob"                       deny  "$(pad "rm -rf $SP/.*")"
+check "scratchpad: rm -rf with no path"              deny  "$(pad 'rm -rf' "$SP")"
+check "scratchpad: --no-preserve-root"               deny  "$(pad "rm -rf --no-preserve-root $SP/clone")"
+check "scratchpad: rm -rf /"                         deny  "$(pad 'rm -rf /' "$SP")"
+check "scratchpad: another command in the chain"     deny  "$(pad "rm -rf $SP/sub && ln -s / $SP/sub")"
+rm -rf "$PADS" "$OUT"
 
 out=$(jq -cn '{session_id: "c1", hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: {file_path: "/tmp/x"}}' \
   | "$ROOT/bin/node-run" "$ROOT/scripts/hooks/suggest-compact.js" 2>&1; echo "exit=$?")
