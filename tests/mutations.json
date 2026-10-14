@@ -2271,5 +2271,107 @@
     "file": "mods/side-panel/hooks/register.tsx",
     "find": "if (e.isInteractive && hasContent && ",
     "replace": "if (hasContent && "
+  },
+  {
+    "label": "gateguard: scratchpad rm passes without the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (toolName === 'Bash' && isScratchpadOnlyRm(command, data)) {",
+    "replace": "if (false) {"
+  },
+  {
+    "label": "gateguard: scratchpad is this session's own",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "/${sessionId}/scratchpad/[^/]`",
+    "replace": "/[^/]+/scratchpad/[^/]`"
+  },
+  {
+    "label": "gateguard: scratchpad itself is never removed",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "/scratchpad/[^/]`",
+    "replace": "/scratchpad`"
+  },
+  {
+    "label": "gateguard: scratchpad target's parent resolved on disk",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "path.join(fs.realpathSync(parent), base)",
+    "replace": "path.join(path.resolve(parent), base)"
+  },
+  {
+    "label": "gateguard: scratchpad trailing slash follows the link",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "  if (trailingSlash) {\n",
+    "replace": "  if (false) {\n"
+  },
+  {
+    "label": "gateguard: scratchpad no glob above the last part",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": " || GLOB_CHARS.test(parent)) return null;",
+    "replace": ") return null;"
+  },
+  {
+    "label": "gateguard: scratchpad no dot glob",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "(base.startsWith('.') || trailingSlash)",
+    "replace": "trailingSlash"
+  },
+  {
+    "label": "gateguard: scratchpad unknown rm options keep the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (!SCRATCHPAD_RM_SHORT_FLAGS.test(arg.text) && !SCRATCHPAD_RM_LONG_FLAGS.has(arg.text)) return false;",
+    "replace": "/* any option */"
+  },
+  {
+    "label": "gateguard: scratchpad $ keeps the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (/[$`\\\\(){}<>|&#!~\\r]/.test(ch)) {",
+    "replace": "if (/[`\\\\(){}<>|&#!~\\r]/.test(ch)) {"
+  },
+  {
+    "label": "gateguard: scratchpad $ in double quotes keeps the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "else if (quote === '\"' && /[$`\\\\]/.test(ch)) return null;",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: scratchpad ~ resolves to HOME",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "    text = home + text;\n",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: scratchpad only rm, cd, ls, echo, pwd, true",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "!SCRATCHPAD_CHAIN_COMMANDS.has(name.text)",
+    "replace": "false"
+  },
+  {
+    "label": "gateguard: scratchpad cd moves the cwd",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "cwd = next ? path.resolve(next) : null;",
+    "replace": "cwd = cwd;"
+  },
+  {
+    "label": "gateguard: scratchpad after ; a cd is undone",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "      cwd = listCwd;\n",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: scratchpad after ; a cd may have worked",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (listHasCd) listCwd = null;",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: scratchpad needs a target",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "return targets > 0;",
+    "replace": "return true;"
+  },
+  {
+    "label": "gateguard: retry message says the exact same command",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "retry the exact same command: a changed command is a new one and is gated again.",
+    "replace": "retry the same operation."
   }
 ]
