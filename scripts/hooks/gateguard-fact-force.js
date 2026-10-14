@@ -1692,6 +1692,229 @@ function isReadOnlyGitIntrospection(command) {
   return false;
 }
 
+// --- Session scratchpad rm (local to ecc@erick, not upstream ECC) ---
+//
+// Claude Code gives each session a scratchpad at
+// /tmp/claude-<uid>/<project>/<session_id>/scratchpad/, shared by the session's
+// subagents. An `rm` whose every target resolves inside it passes the destructive
+// gate. Anything the hook cannot resolve for certain keeps the gate: `$VAR`,
+// `$(...)`, backticks, escapes, redirections, pipes, `||`, globs above the last
+// path component, and any command in the line other than rm, cd, ls, echo, pwd
+// and true (they could move or link a path between this check and the rm).
+
+const SCRATCHPAD_CHAIN_COMMANDS = new Set(['rm', 'cd', 'ls', 'echo', 'pwd', 'true']);
+const SCRATCHPAD_RM_SHORT_FLAGS = /^-[rRfvdiI]+$/;
+const SCRATCHPAD_RM_LONG_FLAGS = new Set([
+  '--recursive',
+  '--force',
+  '--verbose',
+  '--dir',
+  '--interactive',
+  '--one-file-system',
+  '--preserve-root'
+]);
+const GLOB_CHARS = /[*?[]/;
+
+/**
+ * Split a command line into simple commands for the scratchpad check. Returns
+ * null for anything outside a small literal subset of the shell: words in plain
+ * text or quotes, joined by `&&`, `;` or newlines.
+ *
+ * @param {string} input
+ * @returns {{ words: { text: string, tilde: boolean }[], sep: string }[] | null}
+ */
+function literalCommandList(input) {
+  const segments = [];
+  let words = [];
+  let current = null;
+  let quote = null;
+
+  const flushWord = () => {
+    if (current) words.push(current);
+    current = null;
+  };
+  const flushSegment = sep => {
+    flushWord();
+    if (!words.length) return false;
+    segments.push({ words, sep });
+    words = [];
+    return true;
+  };
+
+  const source = String(input || '');
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else if (quote === '"' && /[$`\\]/.test(ch)) return null;
+      else current.text += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      if (!current) current = { text: '', tilde: false };
+      continue;
+    }
+    if (ch === '&' && source[i + 1] === '&') {
+      if (!flushSegment('&&')) return null;
+      i += 1;
+      continue;
+    }
+    if (ch === ';' || ch === '\n') {
+      if (!flushSegment(';')) return null;
+      continue;
+    }
+    if (/[$`\\(){}<>|&#!~\r]/.test(ch)) {
+      // `~` expands only as an unquoted word start, and only `~` or `~/`.
+      const next = source[i + 1];
+      if (ch !== '~' || current || (next !== undefined && next !== '/' && !/\s/.test(next))) return null;
+      current = { text: '', tilde: true };
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      flushWord();
+      continue;
+    }
+    if (!current) current = { text: '', tilde: false };
+    current.text += ch;
+  }
+  if (quote) return null;
+  flushWord();
+  if (words.length) segments.push({ words, sep: '' });
+  else if (segments.length && segments[segments.length - 1].sep === '&&') return null;
+  return segments;
+}
+
+/**
+ * Turn one word into an absolute path, unnormalized so `..` is later resolved
+ * on disk rather than by text. Returns null when it cannot be known.
+ *
+ * @param {{ text: string, tilde: boolean }} word
+ * @param {string | null} cwd
+ * @returns {string | null}
+ */
+function literalPath(word, cwd) {
+  let text = word.text;
+  if (word.tilde) {
+    const home = process.env.HOME || '';
+    if (!path.isAbsolute(home)) return null;
+    text = home + text;
+  }
+  if (!text) return null;
+  if (path.isAbsolute(text)) return text;
+  return cwd ? `${cwd}/${text}` : null;
+}
+
+/**
+ * Where an rm target lands on disk: the real path of its parent joined with its
+ * last component, since rm removes a symlink itself rather than what it points
+ * to. With a trailing slash rm follows the link, so the whole path is resolved.
+ *
+ * @param {string} target absolute, as written
+ * @returns {string | null}
+ */
+function resolveRmTarget(target) {
+  const trimmed = target.replace(/\/+$/, '');
+  const slash = trimmed.lastIndexOf('/');
+  if (slash < 0) return null;
+  const parent = trimmed.slice(0, slash) || '/';
+  const base = trimmed.slice(slash + 1);
+  if (!base || base === '.' || base === '..' || GLOB_CHARS.test(parent)) return null;
+  const trailingSlash = trimmed !== target;
+  if (GLOB_CHARS.test(base) && (base.startsWith('.') || trailingSlash)) return null;
+  let resolved;
+  try {
+    resolved = path.join(fs.realpathSync(parent), base);
+  } catch (_) {
+    return null;
+  }
+  if (trailingSlash) {
+    try {
+      resolved = fs.realpathSync(trimmed);
+    } catch (_) {
+      /* nothing there to follow */
+    }
+  }
+  return resolved;
+}
+
+/**
+ * The pattern of a path inside this session's scratchpad, or null.
+ *
+ * @param {object} data hook input
+ * @returns {RegExp | null}
+ */
+function sessionScratchpadPattern(data) {
+  const sessionId = String((data && data.session_id) || '');
+  if (!/^[A-Za-z0-9-]+$/.test(sessionId) || typeof process.getuid !== 'function') return null;
+  let tmp;
+  try {
+    tmp = fs.realpathSync('/tmp');
+  } catch (_) {
+    return null;
+  }
+  const escapedTmp = tmp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escapedTmp}/claude-${process.getuid()}/[^/]+/${sessionId}/scratchpad/[^/]`);
+}
+
+/**
+ * True when the command only deletes paths inside this session's scratchpad.
+ *
+ * @param {string} command
+ * @param {object} data hook input
+ * @returns {boolean}
+ */
+function isScratchpadOnlyRm(command, data) {
+  const scratchpad = sessionScratchpadPattern(data);
+  const segments = scratchpad && literalCommandList(command);
+  if (!segments) return false;
+  const startCwd = typeof data.cwd === 'string' && path.isAbsolute(data.cwd) ? data.cwd : null;
+  let listCwd = startCwd;
+  let cwd = startCwd;
+  let listHasCd = false;
+  let targets = 0;
+
+  for (const { words, sep } of segments) {
+    const [name, ...args] = words;
+    if (name.tilde || !SCRATCHPAD_CHAIN_COMMANDS.has(name.text)) return false;
+
+    if (name.text === 'cd') {
+      if (args.length > 1 || (args[0] && (args[0].text.startsWith('-') || GLOB_CHARS.test(args[0].text)))) return false;
+      const dir = args[0] || { text: '', tilde: true };
+      if (!dir.tilde && !path.isAbsolute(dir.text) && process.env.CDPATH) return false;
+      const next = literalPath(dir, cwd);
+      cwd = next ? path.resolve(next) : null;
+      listHasCd = true;
+    }
+
+    if (name.text === 'rm') {
+      let options = true;
+      for (const arg of args) {
+        if (options && !arg.tilde && arg.text === '--') {
+          options = false;
+          continue;
+        }
+        if (options && !arg.tilde && arg.text.startsWith('-')) {
+          if (!SCRATCHPAD_RM_SHORT_FLAGS.test(arg.text) && !SCRATCHPAD_RM_LONG_FLAGS.has(arg.text)) return false;
+          continue;
+        }
+        const target = literalPath(arg, cwd);
+        const resolved = target && resolveRmTarget(target);
+        if (!resolved || !scratchpad.test(resolved)) return false;
+        targets += 1;
+      }
+    }
+
+    // A failed cd leaves the old directory, so after `;` it is no longer known.
+    if (sep === ';') {
+      if (listHasCd) listCwd = null;
+      cwd = listCwd;
+      listHasCd = false;
+    }
+  }
+  return targets > 0;
+}
+
 // --- Gate messages ---
 
 /**
@@ -1770,7 +1993,7 @@ function destructiveBashMsg() {
     '2. Write a one-line rollback procedure',
     "3. Quote the user's current instruction verbatim",
     '',
-    'Present the facts, then retry the same operation.'
+    'Present the facts, then retry the exact same command: a changed command is a new one and is gated again.'
   ].join('\n');
 }
 
@@ -1918,6 +2141,10 @@ function run(rawInput) {
     }
 
     if (classifyDestructiveCommand(toolName, command).length > 0) {
+      if (toolName === 'Bash' && isScratchpadOnlyRm(command, data)) {
+        return rawInput; // every target is inside this session's own scratchpad
+      }
+
       // Gate destructive commands on first attempt; allow retry after facts presented
       const key = '__destructive__' + crypto.createHash('sha256').update(command).digest('hex').slice(0, 16);
       if (!isChecked(key)) {
