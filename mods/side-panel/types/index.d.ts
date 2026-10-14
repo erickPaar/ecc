@@ -5,15 +5,16 @@ export type Pull = {
   sha: string // the head, full
   title: string
   isDraft: boolean
-  isReviewed: boolean // a comment names this head (and the review word, when one is set)
+  isReviewed: boolean // a reviewer's comment or review names this head (and the review word, when one is set)
 }
 
 export type Line = { kind: 'heading' | 'text'; text: string; tone?: 'red' | 'green' | 'blue' }
 
+export type Asked = { key: string; at: number } // a head queued from the pane (repo#number@sha), and when
+
 export type Board = {
   pulls: Pull[]
   lines: Line[]
-  at: number // when it was read
   error?: string // why the last read failed, shown dim
 }
 
@@ -21,9 +22,8 @@ declare module 'claude-code' {
   interface PluginState {
     'side-panel': {
       board: Board
-      asked: string[] // heads whose review was queued from the pane: repo#number@sha
-      title: string // the session's title, kept across reloads
-      isShown: boolean
+      asked: Asked[] // heads whose review was queued from the pane
+      title: string // the session's title, when the engine passes one; kept across reloads
     }
   }
 }
