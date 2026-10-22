@@ -133,6 +133,23 @@ const HELD: [string, string][] = [
   ['git push origin +:', 'push to the default branch'],
   ['git push origin feat:heads/main', 'push to the default branch'],
   ['git push origin main:', 'push to the default branch'],
+  // an upload from standard input
+  ['aws s3 cp - s3://b/k', 'upload to S3'],
+  // -h as an option's value is a value
+  ['gh secret set TOKEN -b -h', 'GitHub repository settings'],
+  ['gh api repos/o/r/hooks -t -h -f url=https://x', 'GitHub API write'],
+  // an endpoint written with its host, a leading / or a query string
+  ['gh api https://api.github.com/graphql -f query="mutation { x }"', 'GitHub API write'],
+  ['gh api /graphql -f query="mutation { x }"', 'GitHub API write'],
+  ['gh api /repos/o/r/hooks?per_page=1 -f url=https://x', 'GitHub API write'],
+  ['gh api https://api.github.com/repos/o/r/branches/main/protection -X PUT', 'GitHub API write'],
+  // a merge into a branch through the API
+  ['gh api repos/o/r/merges -f base=main -f head=feat', 'GitHub API write'],
+  // git settings that change what a command or a push does
+  ["git -c alias.ship='push origin main' ship", 'git setting that changes what a push does'],
+  ['git -c remote.origin.push=refs/heads/*:refs/heads/main push', 'git setting that changes what a push does'],
+  ['git -c remote.origin.mirror=true push origin feat/x', 'git setting that changes what a push does'],
+  ['git -c push.default=matching push', 'git setting that changes what a push does'],
   // a refspec or a GraphQL query the guard cannot read
   ['git push origin $BRANCH', 'push from a branch the guard could not read'],
   ['git push origin "HEAD:$TARGET"', 'push from a branch the guard could not read'],
@@ -410,6 +427,14 @@ const ALLOWED = [
   'gh api -X PATCH repos/$OWNER/$(basename "$PWD")/pulls/5 -f body=x',
   'GIT_DIR=/srv/repo/.git git push origin feat/x',
   'env -C /srv/repo git push origin feat/x',
+  'aws s3 cp s3://b/k - | head',
+  'gh pr view 5 --help',
+  'gh api repos/o/r/pulls/5 -h',
+  'gh api -X PUT repos/o/r/branches/main/protection --help',
+  'gh api /repos/o/r/pulls/5?per_page=1',
+  'gh api https://api.github.com/graphql -f query="{ viewer { login } }"',
+  'git -c user.name=x commit -m y',
+  'git -c core.hooksPath=/dev/null push origin feat/x',
   "python3 - <<EOF\nnote='''\\`\\`\\`\nit's done (mostly\n\\`\\`\\`'''\nEOF",
 ]
 
@@ -513,6 +538,23 @@ describe('a push with no refspec', () => {
     expect(heldReason('git checkout - && git push', '', feat)).toBe('push from a branch the guard could not read')
     expect(heldReason('git switch --detach v1 && git push origin HEAD', '', feat)).toBe('push from a branch the guard could not read')
     expect(heldReason('git switch "$B" && git push', '', feat)).toBe('push from a branch the guard could not read')
+    // --track names the branch it makes by the remote branch's last segment
+    expect(heldReason('git checkout --track origin/main && git push', '', feat)).toBe('push to the default branch')
+    expect(heldReason('git checkout -t origin/main && git push', '', feat)).toBe('push to the default branch')
+    expect(heldReason('git switch --track origin/main && git push', '', feat)).toBe('push to the default branch')
+    expect(heldReason('git checkout --track origin/feat/y && git push', '', on('main'))).toBeUndefined()
+    // @{-N} is the branch before, as - is
+    expect(heldReason('git checkout @{-1} && git push', '', feat)).toBe('push from a branch the guard could not read')
+    expect(heldReason('git switch @{-2} && git push', '', feat)).toBe('push from a branch the guard could not read')
+    // a renamed branch is the one pushed
+    expect(heldReason('git branch -m main && git push', '', feat)).toBe('push to the default branch')
+    expect(heldReason('git branch -M feat/y && git push -u origin HEAD', '', on('main'))).toBeUndefined()
+    expect(heldReason('git branch --move old main && git push', '', feat)).toBe('push to the default branch')
+    expect(heldReason('git branch -d old && git push', '', feat)).toBeUndefined()
+    // a git config of the remote or of push earlier in the command: the push cannot be read
+    expect(heldReason('git config remote.origin.push refs/heads/*:refs/heads/main && git push', '', feat)).toBe('push from a branch the guard could not read')
+    expect(heldReason('git config push.default matching; git push origin feat/x', '', feat)).toBe('push from a branch the guard could not read')
+    expect(heldReason('git config user.name x && git push', '', feat)).toBeUndefined()
     // only in the folder it ran in
     const two = new Map([['', 'feat/x'], ['other', 'feat/y']])
     expect(heldReason('git -C other switch main && git -C other push', '', two)).toBe('push to the default branch')

@@ -473,8 +473,8 @@
   {
     "label": "owner-queue: s3 option values are not paths",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    if (S3_VALUE_OPTIONS.has(a) || AWS_VALUE_OPTIONS.has(a)) i += 1\n    else if (!a.startsWith('-')) positional.push(a)",
-    "replace": "    if (!a.startsWith('-')) positional.push(a)"
+    "find": "    if (S3_VALUE_OPTIONS.has(a) || AWS_VALUE_OPTIONS.has(a)) i += 1\n    else if (!a.startsWith('-') || a === '-') positional.push(a)",
+    "replace": "    if (!a.startsWith('-') || a === '-') positional.push(a)"
   },
   {
     "label": "owner-queue: s3 uploads held",
@@ -527,8 +527,8 @@
   {
     "label": "owner-queue: gh -R takes a value",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    if (GH_VALUE_OPTIONS.has(a)) i += 1\n",
-    "replace": "    if (false) i += 1\n"
+    "find": "    if (GH_VALUE_OPTIONS.has(a)) i += 1 // its value",
+    "replace": "    if (false) i += 1 // its value"
   },
   {
     "label": "owner-queue: gh api explicit method",
@@ -593,8 +593,8 @@
   {
     "label": "owner-queue: dispatches and reruns held",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "|\\/(dispatches|rerun|rerun-failed-jobs|approve|pending_deployments|transfer)$/",
-    "replace": "|\\/(pending_deployments|transfer)$/"
+    "find": "|\\/(dispatches|rerun|rerun-failed-jobs|approve|pending_deployments|transfer|merges)$/",
+    "replace": "|\\/(pending_deployments|transfer|merges)$/"
   },
   {
     "label": "owner-queue: pushes to main held",
@@ -1379,8 +1379,8 @@
   {
     "label": "owner-queue: gh help passes",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "  if (args.includes('--help') || args.includes('-h')) return undefined // prints the command's help\n",
-    "replace": ""
+    "find": "  if (isHelp) return undefined // prints the command's help\n  if (group",
+    "replace": "  if (group"
   },
   {
     "label": "owner-queue: gh deploy keys held",
@@ -1427,8 +1427,8 @@
   {
     "label": "owner-queue: deployment approvals and transfers held",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "|approve|pending_deployments|transfer)$/",
-    "replace": "|approve)$/"
+    "find": "|approve|pending_deployments|transfer|merges)$/",
+    "replace": "|approve|merges)$/"
   },
   {
     "label": "owner-queue: deleting a comment passes",
@@ -1759,20 +1759,20 @@
   {
     "label": "owner-queue: a checkout switches the branch",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "  if ((sub === 'checkout' || sub === 'switch') && !isElsewhere) {",
-    "replace": "  if (sub === 'switch' && !isElsewhere) {"
+    "find": "  if ((sub === 'checkout' || sub === 'switch' || sub === 'branch') && !isElsewhere) {",
+    "replace": "  if ((sub === 'switch' || sub === 'branch') && !isElsewhere) {"
   },
   {
     "label": "owner-queue: a switch switches the branch",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "  if ((sub === 'checkout' || sub === 'switch') && !isElsewhere) {",
-    "replace": "  if (sub === 'checkout' && !isElsewhere) {"
+    "find": "  if ((sub === 'checkout' || sub === 'switch' || sub === 'branch') && !isElsewhere) {",
+    "replace": "  if ((sub === 'checkout' || sub === 'branch') && !isElsewhere) {"
   },
   {
     "label": "owner-queue: a switch elsewhere switches nothing here",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "  if ((sub === 'checkout' || sub === 'switch') && !isElsewhere) {",
-    "replace": "  if (sub === 'checkout' || sub === 'switch') {"
+    "find": "  if ((sub === 'checkout' || sub === 'switch' || sub === 'branch') && !isElsewhere) {",
+    "replace": "  if (sub === 'checkout' || sub === 'switch' || sub === 'branch') {"
   },
   {
     "label": "owner-queue: a certain switch replaces the branch",
@@ -1813,8 +1813,8 @@
   {
     "label": "owner-queue: an unnamed switch is unknown",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    name === '' || name === '-' || name.includes('$') ? { branch: UNKNOWN",
-    "replace": "    name === '' ? { branch: UNKNOWN"
+    "find": "  return name === '' || name === '-' || /^@\\{-\\d+\\}$/.test(name) || name.includes('$')",
+    "replace": "  return name === ''"
   },
   {
     "label": "owner-queue: switch is certain, checkout is not",
@@ -1965,5 +1965,59 @@
     "file": "mods/owner-queue/hooks/guard.ts",
     "find": " || spec.slice(0, colon) // main: is main",
     "replace": " // main: is main"
+  },
+  {
+    "label": "owner-queue: s3 cp from standard input held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": " || a === '-') positional.push(a) // - is",
+    "replace": ") positional.push(a) // - is"
+  },
+  {
+    "label": "owner-queue: gh api help only as a word",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (a === '--help' || a === '-h') isHelp = true\n    else if (!a.startsWith('-') && endpoint === '')",
+    "replace": "    else if (!a.startsWith('-') && endpoint === '')"
+  },
+  {
+    "label": "owner-queue: gh api endpoints normalised",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "endpoint = endpointPath(a)",
+    "replace": "endpoint = a"
+  },
+  {
+    "label": "owner-queue: merges held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|transfer|merges)$/",
+    "replace": "|transfer)$/"
+  },
+  {
+    "label": "owner-queue: git -c push settings held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (setting !== undefined && PUSH_SETTING.test(setting)) return GIT_SETTING\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: git config of the remote marks the push",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (state.isPushConfigured) return UNREAD_PUSH\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: --track takes the last segment",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (isTrack) return named((words[0] ?? '').split('/').pop() ?? '', true)\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: @{-N} is unknown",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": " || /^@\\{-\\d+\\}$/.test(name) ||",
+    "replace": " ||"
+  },
+  {
+    "label": "owner-queue: branch -m is a switch",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    const to = sub === 'branch' ? renamed(rest) : switchTarget(sub, rest)",
+    "replace": "    const to = sub === 'branch' ? undefined : switchTarget(sub, rest)"
   }
 ]

@@ -16,13 +16,16 @@ type Context = { extra: RegExp | undefined; branches: Branches; needs?: Set<stri
 // What one command has done so far, read in order: every folder a later command may run in (where
 // it starts, and each cd or pushd), and what each folder's branch may be after a checkout or switch
 // (READ is the branch git reads there; UNKNOWN a switch the guard cannot name).
-type State = { dirs: string[]; switched: Map<string, string[]> }
+type State = { dirs: string[]; switched: Map<string, string[]>; isPushConfigured?: boolean }
 const READ = ':read'
 const UNKNOWN = ':unknown'
 
 const TOO_DEEP = 'command nested too deeply to read'
 const UNREADABLE = 'command the guard could not read'
 const DEFAULT_PUSH = 'push to the default branch'
+const GIT_SETTING = 'git setting that changes what a push does'
+// Settings that make a command a push, or change what a push pushes or where.
+const PUSH_SETTING = /^(alias|remote|push)\./i
 const UNREAD_PUSH = 'push from a branch the guard could not read'
 
 // Why the model may not run this command, or undefined when it may. `extra` is the person's own
@@ -209,7 +212,7 @@ function s3(op: string | undefined, rest: readonly string[]): string | undefined
   for (let i = 0; i < rest.length; i += 1) {
     const a = rest[i] ?? ''
     if (S3_VALUE_OPTIONS.has(a) || AWS_VALUE_OPTIONS.has(a)) i += 1
-    else if (!a.startsWith('-')) positional.push(a)
+    else if (!a.startsWith('-') || a === '-') positional.push(a) // - is standard input or output
   }
   if (op === 'cp' || op === 'sync') {
     // The destination is the second positional; an option's value the list above does not know
@@ -230,13 +233,15 @@ const GH_VALUE_OPTIONS = new Set([
 
 function gh(args: readonly string[]): string | undefined {
   const words: string[] = []
+  let isHelp = false
   for (let i = 0; i < args.length && words[0] !== 'api'; i += 1) {
     const a = args[i] ?? ''
-    if (GH_VALUE_OPTIONS.has(a)) i += 1
+    if (GH_VALUE_OPTIONS.has(a)) i += 1 // its value may be -h: a value, not help
+    else if (a === '--help' || a === '-h') isHelp = true
     else if (!a.startsWith('-')) words.push(a)
   }
   const [group = '', verb = '', object = ''] = words
-  if (args.includes('--help') || args.includes('-h')) return undefined // prints the command's help
+  if (isHelp) return undefined // prints the command's help
   if (group === 'workflow' && ['run', 'enable'].includes(verb)) return 'GitHub Actions run'
   if (group === 'run' && verb === 'rerun') return 'GitHub Actions run'
   if ((group === 'secret' || group === 'variable') && ['set', 'delete', 'remove'].includes(verb)) return 'GitHub repository settings'
@@ -247,18 +252,24 @@ function gh(args: readonly string[]): string | undefined {
 }
 
 const SETTINGS_PATH =
-  /(^|\/)(protection|rulesets|collaborators|teams|hooks|secrets|variables|environments|keys|invitations|actions\/permissions|pages|statuses|check-runs|deployments)(\/|$)|\/(dispatches|rerun|rerun-failed-jobs|approve|pending_deployments|transfer)$/
+  /(^|\/)(protection|rulesets|collaborators|teams|hooks|secrets|variables|environments|keys|invitations|actions\/permissions|pages|statuses|check-runs|deployments)(\/|$)|\/(dispatches|rerun|rerun-failed-jobs|approve|pending_deployments|transfer|merges)$/
 // A PATCH that edits a pull request or an issue (its title or body) is ordinary work, and so is
 // deleting a comment.
 const EDITS_WORK = /^\/?repos\/[^/]+\/[^/]+\/(pulls|issues)(\/comments)?\/\d+$/
 const COMMENT = /^\/?repos\/[^/]+\/[^/]+\/((pulls|issues)\/)?comments\/\d+$/
 const MERGE = /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/merge$/
 
+// An endpoint as the rules read it: no scheme and host, no leading /, no query string.
+function endpointPath(endpoint: string): string {
+  return endpoint.replace(/^https?:\/\/[^/]+/, '').replace(/^\/+/, '').replace(/\?.*$/s, '')
+}
+
 function ghApi(args: readonly string[]): string | undefined {
   let method = ''
   let hasFields = false
   let hasInput = false
   let endpoint = ''
+  let isHelp = false
   const values: string[] = []
   const field = (value: string) => {
     hasFields = true
@@ -277,10 +288,12 @@ function ghApi(args: readonly string[]): string | undefined {
       hasInput = true
       if (a === '--input') i += 1
     } else if (['-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache', '-p', '--preview'].includes(a)) i += 1
-    else if (!a.startsWith('-') && endpoint === '') endpoint = a
+    else if (a === '--help' || a === '-h') isHelp = true
+    else if (!a.startsWith('-') && endpoint === '') endpoint = endpointPath(a)
   }
+  if (isHelp) return undefined // prints the command's help
   if (method === '') method = hasFields ? 'POST' : 'GET'
-  if (endpoint === 'graphql') {
+  if (/(^|\/)graphql$/.test(endpoint)) {
     // A query read from a file (query=@f.graphql, --input) or computed (query="$(cat f)", query="$Q")
     // may be a mutation the guard cannot see.
     const isWrite = hasInput || values.some(v => /\bmutation\b/.test(v) || /^query=(@|\$\{?\w+\}?$|.*\$\()/s.test(v))
@@ -314,14 +327,20 @@ function git(args: readonly string[], where: Where, ctx: Context): string | unde
     const a = args[i] ?? ''
     if (a === '-C') at = join(at, args[i + 1] ?? '')
     if (/^--(git-dir|work-tree)(=|$)/.test(a)) isElsewhere = true
+    // -c NAME=VALUE, -cNAME=VALUE, --config-env NAME=VAR, --config-env=NAME=VAR
+    const setting = a === '-c' || a === '--config-env' ? (args[i + 1] ?? '') : /^(-c|--config-env=)(.+)$/.exec(a)?.[2]
+    if (setting !== undefined && PUSH_SETTING.test(setting)) return GIT_SETTING
+    if (a === '--config-env') i += 1
     if (GIT_VALUE_OPTIONS.has(a)) i += 1
     else if (!a.startsWith('-')) break
   }
   const keys = where.state.dirs.map(dir => join(dir, at))
   const sub = args[i] ?? ''
   const rest = args.slice(i + 1)
-  if ((sub === 'checkout' || sub === 'switch') && !isElsewhere) {
-    const to = switchTarget(sub, rest)
+  // A git config of the remote or of push changes what a later push does.
+  if (sub === 'config' && rest.some(a => /^(remote|push)\./i.test(a))) where.state.isPushConfigured = true
+  if ((sub === 'checkout' || sub === 'switch' || sub === 'branch') && !isElsewhere) {
+    const to = sub === 'branch' ? renamed(rest) : switchTarget(sub, rest)
     if (to === undefined) return undefined
     for (const key of keys) {
       const before = where.state.switched.get(key) ?? [READ]
@@ -342,6 +361,7 @@ function push(args: readonly string[], keys: readonly string[], state: State, ct
     if (PUSH_VALUE_OPTIONS.has(a)) j += 1
     else if (!a.startsWith('-')) words.push(a)
   }
+  if (state.isPushConfigured) return UNREAD_PUSH
   let isCurrent = words.length <= 1
   for (const ref of words.slice(1)) {
     const spec = ref.replace(/^\+/, '')
@@ -371,11 +391,11 @@ function push(args: readonly string[], keys: readonly string[], state: State, ct
 // when the guard cannot name it. Undefined when it switches nothing (a checkout of paths).
 function switchTarget(sub: string, args: readonly string[]): { branch: string; isCertain: boolean } | undefined {
   const creates = sub === 'switch' ? ['-c', '-C', '--create', '--force-create', '--orphan'] : ['-b', '-B', '--orphan']
-  const named = (name: string, isCertain: boolean) =>
-    name === '' || name === '-' || name.includes('$') ? { branch: UNKNOWN, isCertain: true } : { branch: name, isCertain }
   const words: string[] = []
+  let isTrack = false
   for (let j = 0; j < args.length; j += 1) {
     const a = args[j] ?? ''
+    if (a === '--track' || a === '-t' || a.startsWith('--track=')) isTrack = true
     const create = creates.find(o => a === o || a.startsWith(o.startsWith('--') ? `${o}=` : o))
     if (create !== undefined) return named(a === create ? (args[j + 1] ?? '') : a.slice(create.length).replace(/^=/, ''), true)
     if (a === '--detach' || (sub === 'switch' && a === '-d')) return { branch: UNKNOWN, isCertain: true }
@@ -386,7 +406,25 @@ function switchTarget(sub: string, args: readonly string[]): { branch: string; i
     if (!a.startsWith('-') || a === '-') words.push(a)
   }
   if (words.length !== 1) return undefined // nothing to switch to, or a tree and paths
+  // --track origin/main makes and switches to main.
+  if (isTrack) return named((words[0] ?? '').split('/').pop() ?? '', true)
   return named(words[0] ?? '', sub === 'switch')
+}
+
+// A branch name as a switch target; - and @{-N} (the branch before) and computed names are unknown.
+function named(name: string, isCertain: boolean): { branch: string; isCertain: boolean } {
+  return name === '' || name === '-' || /^@\{-\d+\}$/.test(name) || name.includes('$')
+    ? { branch: UNKNOWN, isCertain: true }
+    : { branch: name, isCertain }
+}
+
+// git branch -m NEW renames the current branch, which a later push then pushes; -m OLD NEW may
+// rename it (OLD may be the current branch).
+function renamed(args: readonly string[]): { branch: string; isCertain: boolean } | undefined {
+  if (!args.some(a => ['-m', '-M', '--move'].includes(a))) return undefined
+  const words = args.filter(a => !a.startsWith('-'))
+  if (words.length === 1) return named(words[0] ?? '', true)
+  return words.length === 2 ? named(words[1] ?? '', false) : undefined
 }
 
 // A folder relative to another: '' is the session's own.
