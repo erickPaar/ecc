@@ -24,8 +24,9 @@ const title = atom({ plugin: 'owner-queue', key: 'title' } as const, '')
 // ticks an item.
 const OWNER_ORIGINS = new Set(['unclassified', 'composer'])
 
-// Set by register and session.start; a reload runs both again.
-const ctx = { dir: '', from: 'session', paneMode: 'auto' }
+// Set by register and session.start; a reload runs both again. `started` holds the items whose !
+// run this session saw start and has not seen print yet.
+const ctx = { dir: '', from: 'session', paneMode: 'auto', started: new Set<string>() }
 
 async function folder($: Engine, configured: string): Promise<string> {
   if (configured !== '') return configured
@@ -77,7 +78,7 @@ async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after'>): 
 }
 
 async function setStatus($: Engine, item: Item, status: Item['status'], code?: number): Promise<void> {
-  await save($, { ...item, status, code, nonce: undefined, updated: await $.clock.now() }) // a tick spends the nonce
+  await save($, { ...item, status, code, nonce: undefined, running: undefined, updated: await $.clock.now() }) // a tick spends the nonce
   await refresh($)
 }
 
@@ -179,15 +180,30 @@ export const register: Register = (on, options) => {
     return { deny: TEXT.held(what, item.id) }
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'owner-queue: its guard failed, so the command is held.' }))
 
-  // The owner's ! commands arrive here as rows; the last line of their output is the marker.
+  // The owner's ! commands arrive here as two rows: the command (<bash-input>), then its output,
+  // whose last line is the marker. The command's row spends the nonce, since the model sees that row:
+  // from then on only that run's own output can tick the item, and an output without its marker
+  // (a run killed, an output cut short) leaves the item for Done.
   on('session.append', async ($, e, next) => {
     const message = e.message as { type?: string; content?: readonly { type: string; text?: string }[] }
     const origin = (e as unknown as { origin?: { kind?: string } }).origin?.kind ?? ''
     if (message.type === 'user' && e.door === 'command' && OWNER_ORIGINS.has(origin)) {
-      const ran = marker((message.content ?? []).map(part => part.text ?? '').join('\n'))
-      if (ran !== undefined) {
-        const item = (await load($, ctx.dir)).find(one => one.id === ran.id)
-        if (item !== undefined && item.nonce === ran.nonce) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', ran.code)
+      const text = (message.content ?? []).map(part => part.text ?? '').join('\n')
+      if (text.includes('<bash-input>')) {
+        for (const item of await load($, ctx.dir)) {
+          if (item.nonce === undefined || !text.includes(item.nonce)) continue
+          await save($, { ...item, nonce: undefined, running: item.nonce })
+          ctx.started.add(item.id)
+        }
+      } else if (text.includes('<bash-stdout>')) {
+        const ran = marker(text)
+        for (const item of await load($, ctx.dir)) {
+          const isOwn = ran !== undefined && item.id === ran.id && (item.nonce === ran.nonce || item.running === ran.nonce)
+          if (isOwn) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', ran.code)
+          else if (item.running !== undefined && ctx.started.has(item.id)) await save($, { ...item, running: undefined })
+        }
+        ctx.started.clear()
+        await refresh($)
       }
     }
     return next(e)
@@ -231,10 +247,16 @@ export const register: Register = (on, options) => {
                       key={`copy-${item.id}`}
                       label={TEXT.copy}
                       onPress={async () => {
+                        // Read again: another session may have finished it since the pane was drawn.
+                        const now = (await load($, ctx.dir)).find(one => one.id === item.id)
+                        if (now === undefined || (now.status !== 'waiting' && now.status !== 'failed')) {
+                          await refresh($)
+                          return
+                        }
                         // The nonce is in the item before it is on the clipboard, so a quick run ticks.
                         const nonce = newNonce()
-                        await save($, { ...item, nonce })
-                        await $.ui.copy({ text: withMarker(item, nonce), surface: e.surface })
+                        await save($, { ...now, nonce })
+                        await $.ui.copy({ text: withMarker(now, nonce), surface: e.surface })
                         $.ui.toast(TEXT.copied)
                       }}
                     />

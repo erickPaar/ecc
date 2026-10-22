@@ -2,13 +2,16 @@
 // would run, each as its argument list with the quotes taken off, and it opens what runs inside
 // others ($(…), backticks, subshells, heredocs, here-strings and pipes read by a shell, unquoted
 // heredocs' substitutions). It is not a full shell: it reads well-formed commands the way bash
-// would, and anything it cannot read stays in the words, where the rules still see it.
+// would. A quote, substitution or backtick it cannot find the end of throws Unclosed, and the guard
+// holds the command (bash would refuse it too). A substitution stays in its word as `$(` + the
+// commands it runs + `)`, so a rule can tell a computed word from a written one.
 
 const SEPARATORS = new Set([';', '&', '\n', '(', ')'])
 
 // Deeper than this, the reader stops and the guard holds the command (guard.ts).
 export const MAX_DEPTH = 8
 export class TooDeep extends Error {}
+export class Unclosed extends Error {}
 
 type Heredoc = { tag: string; isQuoted: boolean; argv: string[] }
 
@@ -28,7 +31,13 @@ export function commands(text: string, depth = 0): string[][] {
   let upstream: string[][] = []
   let i = 0
 
-  const nested = (inner: string) => out.push(...commands(inner, depth + 1))
+  const nested = (inner: string) => {
+    const found = commands(inner, depth + 1)
+    out.push(...found)
+    return found
+  }
+  // What a substitution leaves in its word: the commands it runs, as written.
+  const computed = (inner: string) => `$(${nested(inner).map(one => one.join(' ')).join('; ')})`
   const endWord = () => {
     if (hasWord) {
       if (target === 'string') hereStrings.push(word)
@@ -74,11 +83,7 @@ export function commands(text: string, depth = 0): string[][] {
     }
     if (c === "'") {
       const end = src.indexOf("'", i + 1)
-      if (end < 0) {
-        word += src.slice(i + 1)
-        hasWord = true
-        break
-      }
+      if (end < 0) throw new Unclosed("a ' is not closed")
       word += src.slice(i + 1, end)
       hasWord = true
       i = end + 1
@@ -87,6 +92,7 @@ export function commands(text: string, depth = 0): string[][] {
     if (c === '$' && src[i + 1] === "'") {
       let end = i + 2
       while (end < src.length && src[end] !== "'") end += src[end] === '\\' ? 2 : 1
+      if (end >= src.length) throw new Unclosed("a $' is not closed")
       word += src.slice(i + 2, end).replace(/\\(.)/g, '$1')
       hasWord = true
       i = end + 1
@@ -102,33 +108,36 @@ export function commands(text: string, depth = 0): string[][] {
           j += 2
         } else if (src[j] === '$' && src[j + 1] === '(') {
           const end = closing(src, j + 1)
-          nested(src.slice(j + 2, end))
+          word += computed(src.slice(j + 2, end))
           j = end + 1
         } else if (src[j] === '`') {
           const end = src.indexOf('`', j + 1)
-          nested(src.slice(j + 1, end < 0 ? src.length : end))
-          j = end < 0 ? src.length : end + 1
+          if (end < 0) throw new Unclosed('a ` is not closed')
+          word += computed(src.slice(j + 1, end))
+          j = end + 1
         } else {
           word += src[j]
           j += 1
         }
       }
+      if (j >= src.length) throw new Unclosed('a " is not closed')
       hasWord = true
       i = j + 1
       continue
     }
     if (c === '$' && src[i + 1] === '(') {
       const end = closing(src, i + 1)
-      nested(src.slice(i + 2, end))
+      word += computed(src.slice(i + 2, end))
       hasWord = true // the substitution's output is part of this word
       i = end + 1
       continue
     }
     if (c === '`') {
       const end = src.indexOf('`', i + 1)
-      nested(src.slice(i + 1, end < 0 ? src.length : end))
+      if (end < 0) throw new Unclosed('a ` is not closed')
+      word += computed(src.slice(i + 1, end))
       hasWord = true
-      i = end < 0 ? src.length : end + 1
+      i = end + 1
       continue
     }
     if (c === '#' && !hasWord) {
@@ -140,7 +149,7 @@ export function commands(text: string, depth = 0): string[][] {
       i += 2
       if (src[i] === '-') i += 1
       while (src[i] === ' ' || src[i] === '\t') i += 1
-      const m = /^(['"]?)([A-Za-z_][\w-]*)\1/.exec(src.slice(i))
+      const m = HEREDOC_TAG.exec(src.slice(i))
       if (m) {
         pending.push({ tag: m[2] ?? '', isQuoted: m[1] !== '', argv })
         i += m[0].length
@@ -169,15 +178,9 @@ export function commands(text: string, depth = 0): string[][] {
       endCommand()
       i += 1
       for (const doc of pending) {
-        const lines: string[] = []
-        while (i < src.length) {
-          const eol = src.indexOf('\n', i)
-          const line = src.slice(i, eol < 0 ? src.length : eol)
-          i = eol < 0 ? src.length : eol + 1
-          if (line.replace(/^\t+/, '').trim() === doc.tag) break
-          lines.push(line)
-        }
-        const body = lines.join('\n')
+        const read = heredocBody(src, i, doc.tag)
+        i = read.next
+        const body = read.body
         // Read as commands when its own program is a shell, or when it is piped into one
         // (`cat <<EOF | bash`): any command after it on the same line.
         const at = out.indexOf(doc.argv)
@@ -219,24 +222,60 @@ function stdinText(argv: readonly string[]): string {
   return unwrap(argv).slice(1).join(' ').replace(/\\n/g, '\n')
 }
 
-// The index of the ) that closes the ( at `open`, skipping quoted text.
+// A heredoc's tag after << or <<-, with its quotes: 'EOF', "EOF" or EOF.
+const HEREDOC_TAG = /^(['"]?)([A-Za-z_][\w-]*)\1/
+
+// A heredoc's body from `start` (the line after its <<) to the line that is its tag, and where the
+// text after that line starts. <<- strips leading tabs; a body with no end runs to the text's end.
+function heredocBody(src: string, start: number, tag: string): { body: string; next: number } {
+  const lines: string[] = []
+  let i = start
+  while (i < src.length) {
+    const eol = src.indexOf('\n', i)
+    const line = src.slice(i, eol < 0 ? src.length : eol)
+    i = eol < 0 ? src.length : eol + 1
+    if (line.replace(/^\t+/, '').trim() === tag) break
+    lines.push(line)
+  }
+  return { body: lines.join('\n'), next: i }
+}
+
+// The index of the ) that closes the ( at `open`, skipping quoted text, comments and heredoc
+// bodies (a commit message in $(cat <<'EOF' … EOF) holds any bracket or quote). Throws Unclosed
+// when the text ends first.
 function closing(src: string, open: number): number {
   let depth = 0
+  let tags: string[] = []
   for (let i = open; i < src.length; i += 1) {
     const c = src[i] ?? ''
     if (c === '\\') i += 1
-    else if (c === "'") i = Math.max(i, src.indexOf("'", i + 1))
-    else if (c === '"') i = closingQuote(src, i)
-    else if (c === '(') depth += 1
+    else if (c === "'") {
+      const end = src.indexOf("'", i + 1)
+      i = end < 0 ? src.length : end // an open quote runs to the end, and the throw below holds it
+    } else if (c === '"') i = closingQuote(src, i)
+    else if (c === '#' && /[\s;&|(]/.test(src[i - 1] ?? '')) {
+      const eol = src.indexOf('\n', i)
+      i = eol < 0 ? src.length : eol - 1 // the newline itself is read next: it may start a heredoc's body
+    } else if (c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
+      const m = HEREDOC_TAG.exec(src.slice(i + 2).replace(/^-?[ \t]*/, ''))
+      if (m) tags.push(m[2] ?? '')
+      i += 1
+    } else if (c === '\n' && tags.length > 0) {
+      let next = i + 1
+      for (const tag of tags) next = heredocBody(src, next, tag).next
+      tags = []
+      i = next - 1
+    } else if (c === '(') depth += 1
     else if (c === ')') {
       depth -= 1
       if (depth === 0) return i
     }
   }
-  return src.length
+  throw new Unclosed('a $( is not closed')
 }
 
-// The index of the " that closes the " at `open`; a $(…) inside it may hold quotes of its own.
+// The index of the " that closes the " at `open`; a $(…) inside it may hold quotes of its own. An
+// open quote runs to the end, where closing() throws.
 function closingQuote(src: string, open: number): number {
   for (let j = open + 1; j < src.length; j += 1) {
     if (src[j] === '\\') j += 1
@@ -246,11 +285,13 @@ function closingQuote(src: string, open: number): number {
   return src.length
 }
 
-// What $(…) and backticks hold in a text that is not otherwise read as commands.
+// What $(…) and backticks hold in a text that is not otherwise read as commands (an unquoted
+// heredoc's body, where a backslash escapes the next character).
 function substitutions(text: string): string[] {
   const found: string[] = []
   for (let i = 0; i < text.length; i += 1) {
-    if (text[i] === '$' && text[i + 1] === '(') {
+    if (text[i] === '\\') i += 1
+    else if (text[i] === '$' && text[i + 1] === '(') {
       const end = closing(text, i + 1)
       found.push(text.slice(i + 2, end))
       i = end
@@ -264,8 +305,9 @@ function substitutions(text: string): string[] {
   return found
 }
 
-// Programs that run what they are given as commands, not as data.
+// Programs that run what they are given as commands, not as data, and their options that take a value.
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'])
+const SHELL_VALUES = ['-o', '+o', '-O', '+O', '--rcfile', '--init-file']
 
 export function program(word = ''): string {
   return word.slice(word.lastIndexOf('/') + 1)
@@ -282,10 +324,11 @@ function afterOptions(args: readonly string[], values: readonly string[]): strin
 }
 
 // Wrappers that run the rest of their arguments as a command: their options that take a value,
-// and how many words come between the options and the command (timeout's duration, flock's file).
+// how many words come between the options and the command (timeout's duration, flock's file), and
+// the options that run it in another folder.
 const ENV_VALUES = ['-u', '--unset', '-C', '--chdir']
-const WRAPPERS: Record<string, { values: string[]; skip?: number }> = {
-  env: { values: ENV_VALUES },
+const WRAPPERS: Record<string, { values: string[]; skip?: number; chdir?: string[] }> = {
+  env: { values: ENV_VALUES, chdir: ['-C', '--chdir'] },
   command: { values: [] },
   exec: { values: ['-a'] },
   nohup: { values: [] },
@@ -293,6 +336,7 @@ const WRAPPERS: Record<string, { values: string[]; skip?: number }> = {
   sudo: {
     values: ['-u', '--user', '-g', '--group', '-C', '--close-from', '-D', '--chdir', '-h', '--host', '-p', '--prompt',
       '-r', '--role', '-t', '--type', '-U', '--other-user', '-T', '--command-timeout', '-R', '--chroot'],
+    chdir: ['-D', '--chdir'],
   },
   doas: { values: ['-u', '-C'] },
   nice: { values: ['-n', '--adjustment'] },
@@ -312,23 +356,42 @@ const KEYWORDS = new Set(['{', '!', 'then', 'do', 'else', 'if', 'elif', 'while',
 // the program that really runs comes first. `su -c` and `flock … -c` become `sh -c`, which
 // handedOver opens.
 export function unwrap(argv: readonly string[]): string[] {
+  return unwrapped(argv).run
+}
+
+// Whether a wrapper or an assignment runs the command in another folder or repository than the one
+// it is typed in (`env -C dir`, `sudo -D dir`, `GIT_DIR=…`), which the guard cannot name.
+export function runsElsewhere(argv: readonly string[]): boolean {
+  return unwrapped(argv).isElsewhere
+}
+
+const ELSEWHERE = /^GIT_(DIR|WORK_TREE)=/
+
+function unwrapped(argv: readonly string[]): { run: string[]; isElsewhere: boolean } {
   let rest = [...argv]
+  let isElsewhere = false
   for (let guard = 0; guard < 16 && rest.length > 0; guard += 1) {
-    while (rest.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nth(rest, 0))) rest = rest.slice(1)
+    while (rest.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nth(rest, 0))) {
+      if (ELSEWHERE.test(nth(rest, 0))) isElsewhere = true
+      rest = rest.slice(1)
+    }
     const name = program(rest[0] ?? '')
     const wrapper = own(WRAPPERS, name)
-    if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(rest[1] ?? '')) return [] // command -v prints, runs nothing
+    if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(rest[1] ?? '')) return { run: [], isElsewhere } // command -v prints, runs nothing
     if (wrapper !== undefined) {
       const args = name === 'env' ? splitString(rest.slice(1)) : rest.slice(1)
-      rest = afterOptions(args, wrapper.values).slice(wrapper.skip ?? 0)
+      const after = afterOptions(args, wrapper.values)
+      const options = args.slice(0, args.length - after.length)
+      if (options.some(a => (wrapper.chdir ?? []).some(o => a === o || a.startsWith(o.startsWith('--') ? `${o}=` : o)))) isElsewhere = true
+      rest = after.slice(wrapper.skip ?? 0)
       if (name === 'flock' && (rest[0] === '-c' || rest[0] === '--command')) rest = ['sh', ...rest]
       continue
     }
     if (name === 'su') {
       const at = rest.findIndex(a => a === '-c' || a === '--command' || a.startsWith('--command='))
-      if (at < 0) return ['sh'] // a shell that reads its commands from standard input
+      if (at < 0) return { run: ['sh'], isElsewhere } // a shell that reads its commands from standard input
       const a = nth(rest, at)
-      return ['sh', '-c', a.startsWith('--command=') ? a.slice(10) : (rest[at + 1] ?? '')]
+      return { run: ['sh', '-c', a.startsWith('--command=') ? a.slice(10) : (rest[at + 1] ?? '')], isElsewhere }
     }
     if (name === 'direnv' && rest[1] === 'exec') {
       rest = rest.slice(3) // the folder whose environment it loads
@@ -353,7 +416,7 @@ export function unwrap(argv: readonly string[]): string[] {
     }
     break
   }
-  return rest
+  return { run: rest, isElsewhere }
 }
 
 // env -S (--split-string) splits its value into the command's words, in its place.
@@ -377,7 +440,10 @@ export function readsCommands(argv: readonly string[], depth = 0): boolean {
   const run = unwrap(argv)
   const name = program(run[0] ?? '')
   if (SHELLS.has(name) || name === 'ssh' || name === 'eval' || name === 'source' || name === '.') return true
-  return depth < 2 && handedOver(argv).some(inner => commands(inner).some(one => readsCommands(one, depth + 1)))
+  const inner = handedOver(argv)
+  // Deeper than this the reader does not look: what is handed over may be a shell, so it is read as one.
+  if (depth >= 2) return inner.length > 0
+  return inner.some(one => commands(one).some(each => readsCommands(each, depth + 1)))
 }
 
 // Options that take a value, for the programs that run a command in a container.
@@ -396,11 +462,14 @@ export function handedOver(argv: readonly string[]): string[] {
   const name = program(run[0] ?? '')
   const args = run.slice(1)
   if (SHELLS.has(name)) {
+    // With -c, the first word that is not an option is the command (`bash -c -e '…'`, `sh -c -- '…'`:
+    // -- reads as an option, and ends them).
+    let hasC = false
     for (let i = 0; i < args.length; i += 1) {
       const a = nth(args, i)
-      if (a === '-o' || a === '+o') i += 1
-      else if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) return i + 1 < args.length ? [nth(args, i + 1)] : []
-      else if (!a.startsWith('-') && !a.startsWith('+')) return []
+      if (SHELL_VALUES.includes(a)) i += 1
+      else if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) hasC = true
+      else if (!a.startsWith('-') && !a.startsWith('+')) return hasC ? [a] : []
     }
     return []
   }

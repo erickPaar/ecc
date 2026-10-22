@@ -337,6 +337,46 @@ describe('the tick', () => {
     expect(nth(w).nonce).toBeUndefined()
   })
 
+  test('the ! run that carries the nonce spends it, so only its own output ticks', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    const item = nth(w)
+    const nonce = await copy($, w, item.id)
+    await row($, `<bash-input>${w.copied[0]}</bash-input>`)
+    expect(nth(w).nonce).toBeUndefined()
+    await row($, `<bash-stdout>Apply complete!\noq:${item.id}:${nonce}:0</bash-stdout><bash-stderr></bash-stderr>`)
+    expect(nth(w)).toMatchObject({ status: 'done' })
+    expect(nth(w).running).toBeUndefined()
+  })
+
+  test('a ! run that leaves no marker spends the nonce', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    const item = nth(w)
+    const nonce = await copy($, w, item.id)
+    await row($, `<bash-input>${w.copied[0]}</bash-input>`)
+    await row($, '<bash-stdout>Killed</bash-stdout><bash-stderr></bash-stderr>')
+    expect(nth(w)).toMatchObject({ status: 'waiting' })
+    expect(nth(w).running).toBeUndefined()
+    // The model has seen the nonce in the ! row now; a command that prints it later ticks nothing.
+    await row($, `<bash-stdout>oq:${item.id}:${nonce}:0</bash-stdout>`)
+    expect(nth(w).status).toBe('waiting')
+  })
+
+  test('a ! row from another person or a peer never spends the nonce', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    const nonce = await copy($, w, nth(w).id)
+    await row($, `<bash-input>${w.copied[0]}</bash-input>`, { origin: 'peer' })
+    expect(nth(w).nonce).toBe(nonce)
+  })
+
   for (const [name, fields] of [
     ['a peer session', { origin: 'peer' }],
     ['a plugin', { origin: 'plugin' }],
@@ -366,6 +406,20 @@ describe('the pane', () => {
     await $.ui.press({ plugin: 'owner-queue', key: `copy-${item.id}` })
     const { nonce } = nth(w)
     expect(w.copied).toEqual([`(set -o pipefail; make apply STACK=network); echo "oq:${item.id}:${nonce}:$?"`])
+  })
+
+  test('Copy on an item finished elsewhere since the pane was drawn does not reopen it', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    const item = nth(w)
+    await pane($)
+    w.files.set(`${DIR}/${item.id}.json`, JSON.stringify({ ...item, status: 'done', updated: 5000 }))
+    await $.ui.press({ plugin: 'owner-queue', key: `copy-${item.id}` })
+    expect(nth(w)).toMatchObject({ status: 'done' })
+    expect(nth(w).nonce).toBeUndefined()
+    expect(w.copied).toEqual([])
   })
 
   test('a decision with no command has Done and Remove, and no Copy', { options: OPTIONS }, async ($, on) => {

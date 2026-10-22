@@ -116,6 +116,41 @@ const HELD: [string, string][] = [
   ['claude plugins disable owner-queue@market', 'plugin settings'],
   ['eval eval eval eval eval echo hi', 'command nested too deeply to read'],
   [`x=${'$('.repeat(10)}echo hi${')'.repeat(10)}`, 'command nested too deeply to read'],
+  // each alternative of a list, one by one
+  ['tofu untaint x', 'infrastructure change'],
+  ['tofu refresh', 'infrastructure change'],
+  ['tofu state replace-provider a b', 'infrastructure change'],
+  ['terragrunt stack run apply', 'infrastructure change'],
+  ['gh repo archive o/r --yes', 'GitHub repository settings'],
+  ['gh api -X POST repos/o/r/actions/runs/1/rerun-failed-jobs', 'GitHub API write'],
+  ['gh api repos/o/r/deployments -f ref=main -f environment=prod', 'GitHub API write'],
+  ['git push --force origin +main', 'push to the default branch'],
+  ['git --git-dir .git push origin main', 'push to the default branch'],
+  // a refspec that pushes every branch, or main by another name
+  ["git push origin 'refs/heads/*'", 'push to the default branch'],
+  ["git push origin 'refs/heads/*:refs/heads/*'", 'push to the default branch'],
+  ['git push origin :', 'push to the default branch'],
+  ['git push origin +:', 'push to the default branch'],
+  ['git push origin feat:heads/main', 'push to the default branch'],
+  ['git push origin main:', 'push to the default branch'],
+  // a refspec or a GraphQL query the guard cannot read
+  ['git push origin $BRANCH', 'push from a branch the guard could not read'],
+  ['git push origin "HEAD:$TARGET"', 'push from a branch the guard could not read'],
+  ['git push origin $(cat branch.txt)', 'push from a branch the guard could not read'],
+  ['gh api graphql -f query="$(cat m.graphql)"', 'GitHub API write'],
+  ['gh api graphql -f query="$Q"', 'GitHub API write'],
+  // help as a value of a list option is a value (the operation runs)
+  ['aws ssm delete-parameters --names p1 help', 'destructive AWS call'],
+  // what the reader cannot read is held: a quote, a substitution or a backtick left open
+  ["echo 'tofu apply", 'command the guard could not read'],
+  ['echo "tofu apply', 'command the guard could not read'],
+  ["echo $'tofu apply", 'command the guard could not read'],
+  ['x=$(echo hi', 'command the guard could not read'],
+  ['x="$(echo hi"', 'command the guard could not read'],
+  ['echo `ls', 'command the guard could not read'],
+  ['echo "`ls"', 'command the guard could not read'],
+  ['echo "`ls""', 'command the guard could not read'],
+  ["x=$(echo 'hi)", 'command the guard could not read'],
 ]
 
 // Spellings that run the same thing.
@@ -241,6 +276,23 @@ const HELD_SPELLINGS = [
   'echo a \\\\\nmake apply',
   'x=$(echo ")"; make apply)',
   "x=$(echo ')'; make apply)",
+  'make \\\r\napply',
+  'echo "$(echo "$(echo ")")" ; make apply)"',
+  'echo "$(cat "$(echo "(")")" && make apply',
+  // a heredoc inside a substitution is data, whatever brackets and quotes it holds
+  "git commit -m \"$(cat <<'EOF'\nWorks :(\nEOF\n)\" && make apply",
+  "git commit -m \"$(cat <<'EOF'\n- covers git push (no refspec\nEOF\n)\" && make apply",
+  "gh pr create --body \"$(cat <<'EOF'\n1) the 12\" screen\nEOF\n)\" && make apply",
+  "git commit -m \"$(cat <<'EOF'\nit's done\nEOF\n)\" && make apply",
+  'x=$(cat <<EOF\nWorks :(\nEOF\n) && make apply',
+  "x=\"$(cat <<-'EOF'\n\tWorks :(\n\tEOF\n)\" && make apply",
+  'x=$(cat <<EOF\n$(make apply)\nEOF\n)',
+  // bash's options after -c come before its command
+  "bash -c -e 'make apply'",
+  "sh -c -- 'make apply'",
+  "bash -c -o pipefail 'make apply'",
+  // programs handing a shell to a shell, deeper than the reader looks
+  "docker exec -i a docker exec -i b docker exec -i c sh <<< 'make apply'",
 ]
 
 const ALLOWED = [
@@ -338,6 +390,27 @@ const ALLOWED = [
   'make -C apply lint',
   'claude plugin list',
   '# tofu apply',
+  "git commit -m \"$(cat <<'EOF'\nfix: it's done (mostly\n- a 12\" screen\nEOF\n)\"",
+  "gh pr create --title x --body \"$(cat <<'EOF'\n1) first :(\nEOF\n)\" && echo ok",
+  'x=$(echo hi # a comment with a quote: it\'s fine\n) && echo "$x"',
+  'echo "$(echo \\()" done',
+  // a ) inside quotes inside $(…) does not close it: closed early, the rest would be an open quote
+  'x=$(echo ")"); echo ok',
+  "x=$(echo ')'); echo ok",
+  'x=$(echo "$(echo ")")"); echo ok',
+  "x=\"$(cat <<-'EOF'\n\tWorks :(\n\tEOF\n)\"; echo ok",
+  'echo $(echo \\() done',
+  'git push origin HEAD:feat/main',
+  'git push origin :feat/old',
+  'git push origin "feat/x"',
+  'terragrunt stack run plan',
+  'aws s3 cp help',
+  'aws ec2 describe-instances --instance-ids $(cat ids.txt)',
+  "gh api graphql -f query='query($o: String!) { repositoryOwner(login: $o) { id } }' -f o=x",
+  'gh api -X PATCH repos/$OWNER/$(basename "$PWD")/pulls/5 -f body=x',
+  'GIT_DIR=/srv/repo/.git git push origin feat/x',
+  'env -C /srv/repo git push origin feat/x',
+  "python3 - <<EOF\nnote='''\\`\\`\\`\nit's done (mostly\n\\`\\`\\`'''\nEOF",
 ]
 
 describe('held', () => {
@@ -364,7 +437,7 @@ describe('allowed', () => {
 describe('a push with no refspec', () => {
   const on = (branch: string) => new Map([['', branch]])
   test('is held when the current branch is the default one', () => {
-    for (const command of ['git push', 'git push origin', 'git push origin HEAD', 'git push -u origin @', 'git push --force', 'git push -o ci.skip origin']) {
+    for (const command of ['git push', 'git push origin', 'git push origin HEAD', 'git push -u origin @', 'git push --force', 'git push -o ci.skip origin', 'git push --repo origin feat']) {
       expect(heldReason(command, '', on('main'))).toBe('push to the default branch')
       expect(heldReason(command, '', on('master'))).toBe('push to the default branch')
       expect(heldReason(command, '', on('feat/x'))).toBeUndefined()
@@ -387,7 +460,65 @@ describe('a push with no refspec', () => {
     const branches = new Map([['', 'feat/x'], ['other', 'main'], ['/srv/repo', 'main']])
     expect(heldReason('git -C other push', '', branches)).toBe('push to the default branch')
     expect(heldReason('cd /srv/repo && git push', '', branches)).toBe('push to the default branch')
+    expect(heldReason('pushd /srv/repo && git push', '', branches)).toBe('push to the default branch')
+    expect(heldReason("cd /srv/repo && bash -c 'git push'", '', branches)).toBe('push to the default branch')
     expect(heldReason('git push', '', branches)).toBeUndefined()
+    expect(pushDirs('pushd /srv/repo && git push')).toEqual(['', '/srv/repo'])
+  })
+  test('a push from a folder the guard cannot name is held', () => {
+    for (const command of [
+      'env -C /srv/repo git push origin HEAD',
+      'env --chdir=/srv/repo git push',
+      'sudo -D /srv/repo git push',
+      'GIT_DIR=/srv/repo/.git git push',
+      'env GIT_WORK_TREE=/srv/repo git push',
+      'git --git-dir=/srv/repo/.git push',
+      'git --work-tree /srv/repo push origin HEAD',
+    ]) {
+      expect(heldReason(command, '', on('feat/x'))).toBe('push from a branch the guard could not read')
+    }
+  })
+  test('a push of the current branch by a substitution reads the branch', () => {
+    for (const command of [
+      'git push -u origin $(git branch --show-current)',
+      'git push origin "$(git rev-parse --abbrev-ref HEAD)"',
+      'git push origin `git symbolic-ref --short HEAD`',
+    ]) {
+      expect(heldReason(command, '', on('main'))).toBe('push to the default branch')
+      expect(heldReason(command, '', on('feat/x'))).toBeUndefined()
+    }
+    for (const command of ['git push origin $(cat branch.txt)', 'git push origin $BRANCH', 'git push origin "${B}"', 'git push origin HEAD:$B']) {
+      expect(heldReason(command, '', on('feat/x'))).toBe('push from a branch the guard could not read')
+    }
+  })
+  test('a branch switched earlier in the command is the branch pushed', () => {
+    const feat = on('feat/x')
+    expect(heldReason('git checkout main && git merge --ff-only feat && git push', '', feat)).toBe('push to the default branch')
+    expect(heldReason('git switch main && git push origin HEAD', '', feat)).toBe('push to the default branch')
+    expect(heldReason('git switch master; git push', '', feat)).toBe('push to the default branch')
+    expect(heldReason("bash -c 'git switch main && git push'", '', feat)).toBe('push to the default branch')
+    // a new branch, made and switched to, is the one pushed
+    expect(heldReason('git checkout -b feat/y && git push -u origin HEAD', '', on('main'))).toBeUndefined()
+    expect(heldReason('git switch -c feat/y && git push -u origin HEAD', '', on('main'))).toBeUndefined()
+    expect(heldReason('git switch --create=feat/y && git push -u origin HEAD', '', on('main'))).toBeUndefined()
+    expect(heldReason('git checkout -b main && git push -u origin HEAD', '', feat)).toBe('push to the default branch')
+    // checkout of one word may be a file: the branch may stay what it was
+    expect(heldReason('git checkout README.md && git push', '', on('main'))).toBe('push to the default branch')
+    expect(heldReason('git checkout feat/y && git push', '', feat)).toBeUndefined()
+    // a checkout of paths switches nothing, nor one in another repository
+    expect(heldReason('git checkout main -- f.txt && git push', '', feat)).toBeUndefined()
+    expect(heldReason('git checkout main f.txt && git push', '', feat)).toBeUndefined()
+    expect(heldReason('GIT_DIR=/other/.git git switch main && git push', '', feat)).toBeUndefined()
+    // a switch the guard cannot name holds
+    expect(heldReason('git checkout - && git push', '', feat)).toBe('push from a branch the guard could not read')
+    expect(heldReason('git switch --detach v1 && git push origin HEAD', '', feat)).toBe('push from a branch the guard could not read')
+    expect(heldReason('git switch "$B" && git push', '', feat)).toBe('push from a branch the guard could not read')
+    // only in the folder it ran in
+    const two = new Map([['', 'feat/x'], ['other', 'feat/y']])
+    expect(heldReason('git -C other switch main && git -C other push', '', two)).toBe('push to the default branch')
+    expect(heldReason('git -C other switch main && git push', '', two)).toBeUndefined()
+    // a push with a refspec does not depend on the branch
+    expect(heldReason('git switch main && git push origin feat/x', '', feat)).toBeUndefined()
   })
 })
 
@@ -417,7 +548,15 @@ describe('the shell reader', () => {
   test('a redirection target is one word, quotes and all', () => {
     expect(commands("a > 'my file' b")).toEqual([['a', 'b']])
   })
-  test('an unbalanced quote keeps the rest in the word', () => {
-    expect(commands("echo 'tofu apply")).toEqual([['echo', 'tofu apply']])
+  test('an unbalanced quote is unreadable', () => {
+    expect(() => commands("echo 'tofu apply")).toThrow()
+  })
+  test('a substitution leaves its commands in the word, so a rule can tell a word was computed', () => {
+    expect(commands('echo "a $(git branch --show-current) b" `ls -a`')).toEqual([
+      ['git', 'branch', '--show-current'], ['ls', '-a'], ['echo', 'a $(git branch --show-current) b', '$(ls -a)'],
+    ])
+  })
+  test('a heredoc inside a substitution is skipped to its end', () => {
+    expect(commands("x=$(cat <<'EOF'\n(\nEOF\n); ls")).toEqual([['cat'], ['x=$(cat)'], ['ls']])
   })
 })

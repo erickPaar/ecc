@@ -10,6 +10,7 @@ export type Item = {
   status: Status
   code?: number // the exit code the marker reported
   nonce?: string // made at the last Copy, spent by the tick; only a marker carrying it ticks
+  running?: string // the nonce of a ! run that started: only that run's own output can tick it
   created: number
   updated: number
 }

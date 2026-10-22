@@ -395,8 +395,8 @@
   {
     "label": "owner-queue: run-all held",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "(first === 'run-all' || first === 'run') && ",
-    "replace": "false && "
+    "find": "if (['run-all', 'run'].includes(words[at] ?? '') && ",
+    "replace": "if (false && "
   },
   {
     "label": "owner-queue: terragrunt is iac",
@@ -419,13 +419,13 @@
   {
     "label": "owner-queue: aws global options take a value",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    if (AWS_VALUE_OPTIONS.has(a)) i += 1\n    else if (!a.startsWith('-')) words.push(a)",
-    "replace": "    if (!a.startsWith('-')) words.push(a)"
+    "find": "    if (AWS_VALUE_OPTIONS.has(a)) i += 1\n    else if (!a.startsWith('-')) {\n      words.push(a)",
+    "replace": "    if (!a.startsWith('-')) {\n      words.push(a)"
   },
   {
     "label": "owner-queue: aws help passes",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "  if (args[last] === 'help' && last > 0 && !(args[last - 1] ?? '-').startsWith('-')) return undefined\n",
+    "find": "  if (service === 'help' || op === 'help' || args[opAt + 1] === 'help') return undefined\n",
     "replace": ""
   },
   {
@@ -563,8 +563,8 @@
   {
     "label": "owner-queue: graphql mutations held",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "values.some(v => /\\bmutation\\b/.test(v) || /^query=@/.test(v))",
-    "replace": "values.some(v => /^query=@/.test(v))"
+    "find": "values.some(v => /\\bmutation\\b/.test(v) || /^query=",
+    "replace": "values.some(v => /^query="
   },
   {
     "label": "owner-queue: PR and issue edits pass",
@@ -599,8 +599,8 @@
   {
     "label": "owner-queue: pushes to main held",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "refs.some(r => /(^|:|refs\\/heads\\/)(main|master)$/.test(r))",
-    "replace": "refs.some(r => /^(main|master)$/.test(r))"
+    "find": "const DEFAULT_REF = /^(refs\\/)?(heads\\/)?(main|master)$/",
+    "replace": "const DEFAULT_REF = /^$/"
   },
   {
     "label": "owner-queue: push --mirror held",
@@ -653,26 +653,26 @@
   {
     "label": "owner-queue shell: substitutions in double quotes",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "        } else if (src[j] === '$' && src[j + 1] === '(') {\n          const end = closing(src, j + 1)\n          nested(src.slice(j + 2, end))",
-    "replace": "        } else if (src[j] === '$' && src[j + 1] === '(') {\n          const end = closing(src, j + 1)\n          void end"
+    "find": "          const end = closing(src, j + 1)\n          word += computed(src.slice(j + 2, end))",
+    "replace": "          const end = closing(src, j + 1)\n          word += '$()'"
   },
   {
     "label": "owner-queue shell: backticks in double quotes",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "          nested(src.slice(j + 1, end < 0 ? src.length : end))\n          j = end",
-    "replace": "          j = end"
+    "find": "          if (end < 0) throw new Unclosed('a ` is not closed')\n          word += computed(src.slice(j + 1, end))\n          j = end + 1",
+    "replace": "          if (end < 0) throw new Unclosed('a ` is not closed')\n          word += '$()'\n          j = end + 1"
   },
   {
     "label": "owner-queue shell: bare substitutions",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "      nested(src.slice(i + 2, end))\n      hasWord = true // the substitution's output",
-    "replace": "      hasWord = true // the substitution's output"
+    "find": "      word += computed(src.slice(i + 2, end))\n      hasWord = true // the substitution's output",
+    "replace": "      word += '$()'\n      hasWord = true // the substitution's output"
   },
   {
     "label": "owner-queue shell: bare backticks",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "      nested(src.slice(i + 1, end < 0 ? src.length : end))\n      hasWord = true\n      i = end < 0",
-    "replace": "      hasWord = true\n      i = end < 0"
+    "find": "      word += computed(src.slice(i + 1, end))\n      hasWord = true\n      i = end + 1",
+    "replace": "      word += '$()'\n      hasWord = true\n      i = end + 1"
   },
   {
     "label": "owner-queue shell: comments",
@@ -719,8 +719,8 @@
   {
     "label": "owner-queue shell: assignments before the program",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "    while (rest.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nth(rest, 0))) rest = rest.slice(1)\n",
-    "replace": ""
+    "find": "    while (rest.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nth(rest, 0))) {",
+    "replace": "    while (false) {"
   },
   {
     "label": "owner-queue shell: wrappers unwrapped",
@@ -743,14 +743,14 @@
   {
     "label": "owner-queue shell: bash -c",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "      else if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) return",
-    "replace": "      else if (a === '-c') return"
+    "find": "      else if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) hasC = true",
+    "replace": "      else if (a === '-c') hasC = true"
   },
   {
     "label": "owner-queue shell: bash -o takes a value",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "      if (a === '-o' || a === '+o') i += 1\n",
-    "replace": ""
+    "find": "      if (SHELL_VALUES.includes(a)) i += 1\n      else if",
+    "replace": "      if"
   },
   {
     "label": "owner-queue shell: eval",
@@ -869,8 +869,8 @@
   {
     "label": "owner-queue: Copy carries the marker",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "await $.ui.copy({ text: withMarker(item, nonce), surface: e.surface })",
-    "replace": "await $.ui.copy({ text: item.command, surface: e.surface })"
+    "find": "await $.ui.copy({ text: withMarker(now, nonce), surface: e.surface })",
+    "replace": "await $.ui.copy({ text: now.command, surface: e.surface })"
   },
   {
     "label": "owner-queue: Remove removes",
@@ -983,21 +983,20 @@
   {
     "label": "owner-queue shell: closing() skips single quotes",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "    else if (c === \"'\") i = Math.max(i, src.indexOf(\"'\", i + 1))\n",
-    "replace": ""
+    "find": "    else if (c === \"'\") {\n      const end = src.indexOf(\"'\", i + 1)\n      i = end < 0 ? src.length : end // an open quote runs to the end, and the throw below holds it\n    } else if (c === '\"')",
+    "replace": "    else if (c === '\"')"
   },
   {
     "label": "owner-queue shell: closing() skips double quotes",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "    else if (c === '\"') i = closingQuote(src, i)\n",
-    "replace": ""
+    "find": "    } else if (c === '\"') i = closingQuote(src, i)\n",
+    "replace": "    }\n"
   },
   {
     "label": "owner-queue shell: a substitution inside double quotes inside one",
     "file": "mods/owner-queue/hooks/shell.ts",
     "find": "    else if (src[j] === '$' && src[j + 1] === '(') j = closing(src, j + 1)\n    else if (src[j] === '\"') return j",
-    "replace": "    else if (src[j] === '\"') return j",
-    "redundant": "a $(…) cut short at a ) inside its quotes leaves the rest to the outer reading, which reads it as commands as well"
+    "replace": "    else if (src[j] === '\"') return j"
   },
   {
     "label": "owner-queue shell: <<- heredocs",
@@ -1110,7 +1109,7 @@
   {
     "label": "owner-queue shell: command -v runs nothing",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "    if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(rest[1] ?? '')) return [] // command -v prints, runs nothing\n",
+    "find": "    if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(rest[1] ?? '')) return { run: [], isElsewhere } // command -v prints, runs nothing\n",
     "replace": ""
   },
   {
@@ -1170,8 +1169,8 @@
   {
     "label": "owner-queue shell: su reads its commands",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "      if (at < 0) return ['sh'] // a shell that reads its commands from standard input",
-    "replace": "      if (at < 0) return rest"
+    "find": "      if (at < 0) return { run: ['sh'], isElsewhere } // a shell",
+    "replace": "      if (at < 0) return { run: rest, isElsewhere } // a shell"
   },
   {
     "label": "owner-queue shell: direnv exec",
@@ -1194,7 +1193,7 @@
   {
     "label": "owner-queue shell: a program handing to a shell reads commands",
     "file": "mods/owner-queue/hooks/shell.ts",
-    "find": "  return depth < 2 && handedOver(argv).some(inner => commands(inner).some(one => readsCommands(one, depth + 1)))",
+    "find": "  return inner.some(one => commands(one).some(each => readsCommands(each, depth + 1)))",
     "replace": "  return false"
   },
   {
@@ -1278,8 +1277,8 @@
   {
     "label": "owner-queue: a held program later in the words",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "rule(run, dirs, ctx) ?? later(run, dirs, ctx) ?? ",
-    "replace": "rule(run, dirs, ctx) ?? "
+    "find": "rule(run, where, ctx) ?? later(run, where, ctx) ?? ",
+    "replace": "rule(run, where, ctx) ?? "
   },
   {
     "label": "owner-queue: a held program by its bin path",
@@ -1302,7 +1301,7 @@
   {
     "label": "owner-queue: cd moves the push",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    if (program(run[0]) === 'cd') dirs.push(",
+    "find": "    if (['cd', 'pushd'].includes(program(run[0]))) dirs.push(",
     "replace": "    if (false) dirs.push("
   },
   {
@@ -1338,7 +1337,7 @@
   {
     "label": "owner-queue: aws help as a value is held",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "  if (args[last] === 'help' && last > 0 && !(args[last - 1] ?? '-').startsWith('-')) return undefined",
+    "find": "  if (service === 'help' || op === 'help' || args[opAt + 1] === 'help') return undefined",
     "replace": "  if (args.includes('help')) return undefined"
   },
   {
@@ -1410,8 +1409,8 @@
   {
     "label": "owner-queue: graphql from a file held",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "values.some(v => /\\bmutation\\b/.test(v) || /^query=@/.test(v))",
-    "replace": "values.some(v => /\\bmutation\\b/.test(v))"
+    "find": "/^query=(@|\\$\\{?\\w+\\}?$|.*\\$\\()/s",
+    "replace": "/^query=(\\$\\{?\\w+\\}?$|.*\\$\\()/s"
   },
   {
     "label": "owner-queue: graphql --input held",
@@ -1422,8 +1421,8 @@
   {
     "label": "owner-queue: statuses and check runs held",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "|pages|statuses|check-runs)",
-    "replace": "|pages)"
+    "find": "|pages|statuses|check-runs|deployments)",
+    "replace": "|pages|deployments)"
   },
   {
     "label": "owner-queue: deployment approvals and transfers held",
@@ -1482,20 +1481,20 @@
   {
     "label": "owner-queue: a push of HEAD reads the branch",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "  if (refs.length > 0 && !refs.some(r => r === 'HEAD' || r === '@')) return undefined",
-    "replace": "  if (refs.length > 0) return undefined"
+    "find": "    if (CURRENT_REF.test(destination)) isCurrent = true\n    else if",
+    "replace": "    if"
   },
   {
     "label": "owner-queue: an unread branch holds",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    else if (!ctx.branches.has(key)) return 'push from a branch the guard could not read'",
-    "replace": "    else if (!ctx.branches.has(key)) return undefined"
+    "find": "      if (branch === undefined || branch === UNKNOWN) return UNREAD_PUSH",
+    "replace": "      if (branch === undefined || branch === UNKNOWN) return undefined"
   },
   {
     "label": "owner-queue: the default branch holds",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    else if (DEFAULT_BRANCH.test(ctx.branches.get(key) ?? '')) return",
-    "replace": "    else if (false) return"
+    "find": "      if (DEFAULT_BRANCH.test(branch)) return DEFAULT_PUSH",
+    "replace": "      if (false) return DEFAULT_PUSH"
   },
   {
     "label": "owner-queue: an absolute folder is not joined",
@@ -1542,19 +1541,19 @@
   {
     "label": "owner-queue: only the right nonce ticks",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "if (item !== undefined && item.nonce === ran.nonce) await",
-    "replace": "if (item !== undefined) await"
+    "find": "item.id === ran.id && (item.nonce === ran.nonce || item.running === ran.nonce)",
+    "replace": "item.id === ran.id"
   },
   {
     "label": "owner-queue: a tick spends the nonce",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "nonce: undefined, updated",
-    "replace": "updated"
+    "find": "nonce: undefined, running: undefined, updated",
+    "replace": "running: undefined, updated"
   },
   {
     "label": "owner-queue: Copy stores the nonce",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "                        await save($, { ...item, nonce })\n",
+    "find": "                        await save($, { ...now, nonce })\n",
     "replace": ""
   },
   {
@@ -1630,5 +1629,341 @@
     "file": "mods/owner-queue/hooks/queue.ts",
     "find": "(fields.command !== '' || one.why === fields.why)",
     "replace": "true"
+  },
+  {
+    "label": "owner-queue: a forced refspec's + comes off",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    const spec = ref.replace(/^\\+/, '')",
+    "replace": "    const spec = ref"
+  },
+  {
+    "label": "owner-queue: rerun-failed-jobs held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|rerun|rerun-failed-jobs|",
+    "replace": "|rerun|"
+  },
+  {
+    "label": "owner-queue: iac untaint held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'taint', 'untaint', 'force-unlock'",
+    "replace": "'taint', 'force-unlock'"
+  },
+  {
+    "label": "owner-queue: iac refresh held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "'force-unlock', 'refresh', 'apply-all'",
+    "replace": "'force-unlock', 'apply-all'"
+  },
+  {
+    "label": "owner-queue: state replace-provider held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "['rm', 'mv', 'push', 'replace-provider']",
+    "replace": "['rm', 'mv', 'push']"
+  },
+  {
+    "label": "owner-queue: gh repo archive held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "['edit', 'delete', 'rename', 'archive', 'create']",
+    "replace": "['edit', 'delete', 'rename', 'create']"
+  },
+  {
+    "label": "owner-queue: push --repo takes a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "const PUSH_VALUE_OPTIONS = new Set(['-o', '--push-option', '--repo', ",
+    "replace": "const PUSH_VALUE_OPTIONS = new Set(['-o', '--push-option', "
+  },
+  {
+    "label": "owner-queue: git --git-dir takes a value",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', ",
+    "replace": "const GIT_VALUE_OPTIONS = new Set(['-C', '-c', "
+  },
+  {
+    "label": "owner-queue shell: closing() skips escapes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (c === '\\\\') i += 1\n    else if (c === \"'\") {\n      const end = src.indexOf",
+    "replace": "    if (false) i += 1\n    else if (c === \"'\") {\n      const end = src.indexOf"
+  },
+  {
+    "label": "owner-queue shell: CRLF continuations",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": " || (src[i + 1] === '\\r' && src[i + 2] === '\\n')) {",
+    "replace": ") {"
+  },
+  {
+    "label": "owner-queue shell: closing() skips heredoc bodies",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (m) tags.push(m[2] ?? '')\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: closing() skips <<- heredoc bodies",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "HEREDOC_TAG.exec(src.slice(i + 2).replace(/^-?[ \\t]*/, ''))",
+    "replace": "HEREDOC_TAG.exec(src.slice(i + 2).replace(/^[ \\t]*/, ''))"
+  },
+  {
+    "label": "owner-queue shell: closing() skips comments",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    else if (c === '#' && /[\\s;&|(]/.test(src[i - 1] ?? '')) {",
+    "replace": "    else if (false) {"
+  },
+  {
+    "label": "owner-queue shell: an unclosed $( is unreadable",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  throw new Unclosed('a $( is not closed')",
+    "replace": "  return src.length"
+  },
+  {
+    "label": "owner-queue shell: an unclosed ' is unreadable",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (end < 0) throw new Unclosed(\"a ' is not closed\")\n      word += src.slice(i + 1, end)",
+    "replace": "      if (end < 0) break\n      word += src.slice(i + 1, end)"
+  },
+  {
+    "label": "owner-queue shell: an unclosed $' is unreadable",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (end >= src.length) throw new Unclosed(\"a $' is not closed\")\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: an unclosed \" is unreadable",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (j >= src.length) throw new Unclosed('a \" is not closed')\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: an unclosed ` in \" is unreadable",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "          if (end < 0) throw new Unclosed('a ` is not closed')\n          word += computed(src.slice(j + 1, end))",
+    "replace": "          if (end < 0) break\n          word += computed(src.slice(j + 1, end))"
+  },
+  {
+    "label": "owner-queue shell: an unclosed ` is unreadable",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (end < 0) throw new Unclosed('a ` is not closed')\n      word += computed(src.slice(i + 1, end))",
+    "replace": "      if (end < 0) break\n      word += computed(src.slice(i + 1, end))"
+  },
+  {
+    "label": "owner-queue: unreadable holds",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (error instanceof Unclosed) return UNREADABLE",
+    "replace": "    if (error instanceof Unclosed) return undefined"
+  },
+  {
+    "label": "owner-queue shell: heredoc substitutions honour escapes",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    if (text[i] === '\\\\') i += 1\n    else if (text[i] === '$'",
+    "replace": "    if (text[i] === '$'"
+  },
+  {
+    "label": "owner-queue: a checkout switches the branch",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if ((sub === 'checkout' || sub === 'switch') && !isElsewhere) {",
+    "replace": "  if (sub === 'switch' && !isElsewhere) {"
+  },
+  {
+    "label": "owner-queue: a switch switches the branch",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if ((sub === 'checkout' || sub === 'switch') && !isElsewhere) {",
+    "replace": "  if (sub === 'checkout' && !isElsewhere) {"
+  },
+  {
+    "label": "owner-queue: a switch elsewhere switches nothing here",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if ((sub === 'checkout' || sub === 'switch') && !isElsewhere) {",
+    "replace": "  if (sub === 'checkout' || sub === 'switch') {"
+  },
+  {
+    "label": "owner-queue: a certain switch replaces the branch",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "to.isCertain ? [to.branch] : [...before, to.branch]",
+    "replace": "[...before, to.branch]"
+  },
+  {
+    "label": "owner-queue: a checkout of one word keeps the branch possible",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "to.isCertain ? [to.branch] : [...before, to.branch]",
+    "replace": "[to.branch]"
+  },
+  {
+    "label": "owner-queue: switch -c creates",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "sub === 'switch' ? ['-c', '-C', '--create', '--force-create', '--orphan'] : ['-b', '-B', '--orphan']",
+    "replace": "sub === 'switch' ? ['-C', '--force-create', '--orphan'] : ['-B', '--orphan']"
+  },
+  {
+    "label": "owner-queue: --create= attached",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "a.startsWith(o.startsWith('--') ? `${o}=` : o)",
+    "replace": "false"
+  },
+  {
+    "label": "owner-queue: a detached switch is unknown",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (a === '--detach' || (sub === 'switch' && a === '-d')) return { branch: UNKNOWN, isCertain: true }\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: a checkout of paths switches nothing",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "      if (j + 1 < args.length) return undefined // paths follow\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: an unnamed switch is unknown",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    name === '' || name === '-' || name.includes('$') ? { branch: UNKNOWN",
+    "replace": "    name === '' ? { branch: UNKNOWN"
+  },
+  {
+    "label": "owner-queue: switch is certain, checkout is not",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  return named(words[0] ?? '', sub === 'switch')",
+    "replace": "  return named(words[0] ?? '', true)"
+  },
+  {
+    "label": "owner-queue: a checkout of a tree and paths switches nothing",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (words.length !== 1) return undefined // nothing",
+    "replace": "  if (words.length === 0) return undefined // nothing"
+  },
+  {
+    "label": "owner-queue: nested commands keep the folders",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "      const nested = judge(commands(inner), ctx, depth + 1, state)",
+    "replace": "      const nested = judge(commands(inner), ctx, depth + 1, { dirs: [''], switched: new Map() })"
+  },
+  {
+    "label": "owner-queue: a computed refspec is unread",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    else if (destination.includes('$')) return UNREAD_PUSH // a variable or a substitution\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: a substitution of the current branch is HEAD",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|\\$\\(git (branch --show-current|rev-parse --abbrev-ref HEAD|symbolic-ref --short HEAD)\\))$/",
+    "replace": ")$/"
+  },
+  {
+    "label": "owner-queue: matching and pattern refspecs held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (spec === ':' || spec.includes('*')) return DEFAULT_PUSH",
+    "replace": "    if (false) return DEFAULT_PUSH"
+  },
+  {
+    "label": "owner-queue: a refspec's destination decides",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    const destination = colon < 0 ? spec : spec.slice(colon + 1) || spec.slice(0, colon) // main: is main",
+    "replace": "    const destination = spec"
+  },
+  {
+    "label": "owner-queue: heads/main is main",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "const DEFAULT_REF = /^(refs\\/)?(heads\\/)?(main|master)$/",
+    "replace": "const DEFAULT_REF = /^(refs\\/heads\\/)?(main|master)$/"
+  },
+  {
+    "label": "owner-queue: pushd moves the push",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "['cd', 'pushd'].includes(",
+    "replace": "['cd'].includes("
+  },
+  {
+    "label": "owner-queue shell: env -C runs elsewhere",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  env: { values: ENV_VALUES, chdir: ['-C', '--chdir'] },",
+    "replace": "  env: { values: ENV_VALUES },"
+  },
+  {
+    "label": "owner-queue shell: sudo -D runs elsewhere",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "    chdir: ['-D', '--chdir'],\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue shell: GIT_DIR= runs elsewhere",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      if (ELSEWHERE.test(nth(rest, 0))) isElsewhere = true\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: git --git-dir= runs elsewhere",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    if (/^--(git-dir|work-tree)(=|$)/.test(a)) isElsewhere = true\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: a push elsewhere is unread",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  if (isElsewhere) return UNREAD_PUSH\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: the guard reads where a wrapper runs",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "    const where = { state, isElsewhere: runsElsewhere(argv) }",
+    "replace": "    const where = { state, isElsewhere: false }"
+  },
+  {
+    "label": "owner-queue shell: bash -c skips options before its command",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "      else if (!a.startsWith('-') && !a.startsWith('+')) return hasC ? [a] : []",
+    "replace": "      else if (!a.startsWith('+')) return hasC ? [a] : []"
+  },
+  {
+    "label": "owner-queue shell: too deep to tell reads as a shell",
+    "file": "mods/owner-queue/hooks/shell.ts",
+    "find": "  if (depth >= 2) return inner.length > 0",
+    "replace": "  if (depth >= 2) return false"
+  },
+  {
+    "label": "owner-queue: a computed graphql query held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "/^query=(@|\\$\\{?\\w+\\}?$|.*\\$\\()/s",
+    "replace": "/^query=@/s"
+  },
+  {
+    "label": "owner-queue: aws help right after the operation passes",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": " || args[opAt + 1] === 'help') return undefined",
+    "replace": ") return undefined"
+  },
+  {
+    "label": "owner-queue: terragrunt stack run held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "  const at = first === 'stack' ? 1 : 0",
+    "replace": "  const at = 0"
+  },
+  {
+    "label": "owner-queue: deployments held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|pages|statuses|check-runs|deployments)",
+    "replace": "|pages|statuses|check-runs)"
+  },
+  {
+    "label": "owner-queue: a ! command's row spends the nonce",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "          await save($, { ...item, nonce: undefined, running: item.nonce })\n          ctx.started.add(item.id)",
+    "replace": "          ctx.started.add(item.id)"
+  },
+  {
+    "label": "owner-queue: a ! run's output ends its nonce",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "          else if (item.running !== undefined && ctx.started.has(item.id)) await save($, { ...item, running: undefined })\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: Copy reads the item again",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "                        if (now === undefined || (now.status !== 'waiting' && now.status !== 'failed')) {",
+    "replace": "                        if (now === undefined) {"
+  },
+  {
+    "label": "owner-queue: an empty destination is the source",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": " || spec.slice(0, colon) // main: is main",
+    "replace": " // main: is main"
   }
 ]
