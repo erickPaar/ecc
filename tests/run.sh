@@ -46,7 +46,7 @@ check "gateguard: asks for the exact same retry" yes "$([[ $reason == *"exact sa
 # session's scratchpad_dir. The cwd it carries is never trusted: a relative path needs a cd first.
 PADS=$(cd "$(mktemp -d)" && pwd -P); SP=$PADS/pad/scratchpad; OTHER=$PADS/other/scratchpad; OUT=$(mktemp -d)
 mkdir -p "$SP/clone" "$SP/sub" "$SP/inner" "$SP/l*" "$SP/atk/home" "$OTHER/clone" "$OUT/inner" "${SP}x/clone"
-ln -s "$OUT" "$SP/link-out"; ln -s /usr "$SP/atk/linkusr"
+ln -s "$OUT" "$SP/link-out"; ln -s /usr "$SP/atk/linkusr"; ln -s "$OUT/gone" "$SP/dangling"
 NBSP=$'\xc2\xa0'
 # Node is pinned: with HOME changed, node-run could miss it and skip the hook, which reads as allow.
 PAD_NODE=$("$ROOT/bin/node-run" -e 'process.stdout.write(process.execPath)')
@@ -76,12 +76,17 @@ check "scratchpad: .. after a symlink, with a slash" deny  "$(pad "rm -rf $SP/at
 check "scratchpad: cd to a symlink, then .."         deny  "$(pad "cd $SP/atk/linkusr && rm -rf ../home" /)"
 check "scratchpad: through a symlink outside"        deny  "$(pad "rm -rf $SP/link-out/inner")"
 check "scratchpad: a symlink with a slash follows"   deny  "$(pad "rm -rf $SP/link-out/")"
+check "scratchpad: a link that fails to resolve"     deny  "$(pad "rm -rf $SP/dangling/")"
 check "scratchpad: \$HOME is not resolved"           deny  "$(pad 'rm -rf $HOME/x')"
 check "scratchpad: a bare \$VAR from inside it"       deny  "$(pad "cd $SP && rm -rf \$HOME")"
 check "scratchpad: a \$VAR in double quotes"          deny  "$(pad "cd $SP && rm -rf \"\$HOME\"")"
 check "scratchpad: ~ that is the scratchpad"         deny  "$(HOME=$SP pad 'rm -rf ~')"
 check "scratchpad: ~user is not HOME"                deny  "$(HOME=$SP/ pad 'rm -rf ~clone')"
 check "scratchpad: zsh =command"                     deny  "$(pad "cd $SP && rm -rf =clone")"
+check "scratchpad: a pipe"                          deny  "$(pad "cd $SP && rm -rf clone | cat")"
+check "scratchpad: a lone &"                         deny  "$(pad "cd $SP && rm -rf clone &")"
+check "scratchpad: a backtick"                       deny  "$(pad "cd $SP && rm -rf \`echo clone\`")"
+check "scratchpad: a > redirect"                     deny  "$(pad "cd $SP && rm -rf clone >log")"
 check "scratchpad: \$(...) is not resolved"          deny  "$(pad "rm -rf $SP/\$(echo clone)")"
 check "scratchpad: one path outside in the list"     deny  "$(pad "rm -rf $SP/clone $OUT/inner")"
 check "scratchpad: a non-breaking space"             deny  "$(pad "rm -rf $SP/clone$NBSP$SP/sub")"

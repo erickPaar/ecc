@@ -2429,6 +2429,36 @@
     "replace": "return true;"
   },
   {
+    "label": "gateguard: scratchpad a link that fails to resolve keeps the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "return fs.realpathSync.native(trimmed);\n    } catch (_) {\n      return null;",
+    "replace": "return fs.realpathSync.native(trimmed);\n    } catch (_) {\n      /* nothing there to follow */"
+  },
+  {
+    "label": "gateguard: scratchpad | keeps the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (/[$`\\\\(){}<>|&#!~\\r]/.test(ch)) {",
+    "replace": "if (/[$`\\\\(){}<>&#!~\\r]/.test(ch)) {"
+  },
+  {
+    "label": "gateguard: scratchpad a lone & keeps the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (/[$`\\\\(){}<>|&#!~\\r]/.test(ch)) {",
+    "replace": "if (/[$`\\\\(){}<>|#!~\\r]/.test(ch)) {"
+  },
+  {
+    "label": "gateguard: scratchpad a backtick keeps the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (/[$`\\\\(){}<>|&#!~\\r]/.test(ch)) {",
+    "replace": "if (/[$\\\\(){}<>|&#!~\\r]/.test(ch)) {"
+  },
+  {
+    "label": "gateguard: scratchpad > keeps the gate",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (/[$`\\\\(){}<>|&#!~\\r]/.test(ch)) {",
+    "replace": "if (/[$`\\\\(){}<|&#!~\\r]/.test(ch)) {"
+  },
+  {
     "label": "gateguard: retry message says the exact same command",
     "file": "scripts/hooks/gateguard-fact-force.js",
     "find": "retry the exact same command: a changed command is a new one and is gated again.",

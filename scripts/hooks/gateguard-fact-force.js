@@ -1845,10 +1845,12 @@ function resolveRmTarget(target) {
   }
   if (GLOB_CHARS.test(base)) return base.startsWith('.') || trailingSlash ? null : realParent;
   if (trailingSlash) {
+    // Any error keeps the gate: a dangling link, a loop, or a chain past glibc's
+    // 4096 bytes, which the kernel may still follow.
     try {
       return fs.realpathSync.native(trimmed);
     } catch (_) {
-      /* nothing there to follow */
+      return null;
     }
   }
   return path.join(realParent, base);

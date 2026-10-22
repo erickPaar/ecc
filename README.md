@@ -22,6 +22,8 @@ parts that earn their place.
 | santa-method | skill: two independent reviewers with the same rubric must both pass before something ships; for high-stakes changes | ECC |
 | Flutter | `flutter-reviewer` and `dart-build-resolver` agents, `/ecc:flutter-review`, `/ecc:flutter-build`, `/ecc:flutter-test`, the `dart-flutter-patterns` skill and an `accessibility` (WCAG 2.2, iOS/Android) skill | ECC |
 
+GateGuard's scratchpad exception assumes the shell's builtin `cd` and `rm` and the hook's `HOME`, and checks paths when the hook runs, not when rm runs. GateGuard is a speed bump, not a fence: its classifier misses commands such as `rm -r`, `sudo rm` and `find -delete`.
+
 GateGuard runs on Bash only. Its edit gate (facts before the first edit of each
 file) and its once-per-session routine-command gate are left off: too much friction
 in auto mode.
