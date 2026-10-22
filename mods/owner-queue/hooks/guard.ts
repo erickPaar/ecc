@@ -11,12 +11,18 @@ import { commands, handedOver, program, runsElsewhere, TooDeep, Unclosed, unwrap
 // a folder missing here holds the push.
 export type Branches = ReadonlyMap<string, string>
 
-type Context = { extra: RegExp | undefined; branches: Branches; needs?: Set<string> }
+// The repositories (owner/name) whose default branch the sessions may push to, the origin URL of
+// each folder a push runs in, and the remote a push with no remote goes to there (branch.<b>.pushRemote,
+// else remote.pushDefault, else branch.<b>.remote, else origin), read like the branches; a folder
+// missing here holds the push.
+export type Pushable = { repos: ReadonlySet<string>; origins: ReadonlyMap<string, string>; remotes?: ReadonlyMap<string, string> }
+
+type Context = { extra: RegExp | undefined; branches: Branches; pushable: Pushable; needs?: Set<string> }
 
 // What one command has done so far, read in order: every folder a later command may run in (where
 // it starts, and each cd or pushd), and what each folder's branch may be after a checkout or switch
 // (READ is the branch git reads there; UNKNOWN a switch the guard cannot name).
-type State = { dirs: string[]; switched: Map<string, string[]>; isPushConfigured?: boolean }
+type State = { dirs: string[]; switched: Map<string, string[]>; isPushConfigured?: boolean; isRemoteChanged?: boolean }
 const READ = ':read'
 const UNKNOWN = ':unknown'
 
@@ -31,21 +37,26 @@ const UNREAD_PUSH = 'push from a branch the guard could not read'
 // Why the model may not run this command, or undefined when it may. `extra` is the person's own
 // regular expression from the plugin's settings, tested against each simple command as one line;
 // an invalid one holds nothing more.
-export function heldReason(command: string, extra = '', branches: Branches = new Map()): string | undefined {
+export function heldReason(
+  command: string,
+  extra = '',
+  branches: Branches = new Map(),
+  pushable: Pushable = { repos: new Set(), origins: new Map() },
+): string | undefined {
   let pattern: RegExp | undefined
   try {
     pattern = extra === '' ? undefined : new RegExp(extra)
   } catch {
     pattern = undefined
   }
-  return read(command, { extra: pattern, branches })
+  return read(command, { extra: pattern, branches, pushable })
 }
 
-// The folders whose current branch a push in this command needs ('' is the session's own), so the
-// caller can read them before heldReason.
+// The folders whose current branch (and origin URL) a push in this command needs ('' is the
+// session's own), so the caller can read them before heldReason.
 export function pushDirs(command: string): string[] {
   const needs = new Set<string>()
-  read(command, { extra: undefined, branches: new Map(), needs })
+  read(command, { extra: undefined, branches: new Map(), pushable: { repos: new Set(), origins: new Map() }, needs })
   return [...needs]
 }
 
@@ -242,6 +253,8 @@ function gh(args: readonly string[]): string | undefined {
   }
   const [group = '', verb = '', object = ''] = words
   if (isHelp) return undefined // prints the command's help
+  // --admin merges past the branch's protection; any position, any value.
+  if (group === 'pr' && verb === 'merge' && args.some(a => a === '--admin' || a.startsWith('--admin='))) return 'merge that skips branch protection'
   if (group === 'workflow' && ['run', 'enable'].includes(verb)) return 'GitHub Actions run'
   if (group === 'run' && verb === 'rerun') return 'GitHub Actions run'
   if ((group === 'secret' || group === 'variable') && ['set', 'delete', 'remove'].includes(verb)) return 'GitHub repository settings'
@@ -339,6 +352,8 @@ function git(args: readonly string[], where: Where, ctx: Context): string | unde
   const rest = args.slice(i + 1)
   // A git config of the remote or of push changes what a later push does.
   if (sub === 'config' && rest.some(a => /^(remote|push)\./i.test(a))) where.state.isPushConfigured = true
+  // A git remote that adds, renames or points one elsewhere changes where a later push goes.
+  if (sub === 'remote' && !['', 'show', 'get-url'].includes(rest.find(a => !a.startsWith('-')) ?? '')) where.state.isRemoteChanged = true
   if ((sub === 'checkout' || sub === 'switch' || sub === 'branch') && !isElsewhere) {
     const to = sub === 'branch' ? renamed(rest) : switchTarget(sub, rest)
     if (to === undefined) return undefined
@@ -355,13 +370,32 @@ function git(args: readonly string[], where: Where, ctx: Context): string | unde
 // on: read by git, or switched to earlier in the command.
 function push(args: readonly string[], keys: readonly string[], state: State, ctx: Context, isElsewhere: boolean): string | undefined {
   const words: string[] = []
+  let isPlain = !isElsewhere && !state.isRemoteChanged
   for (let j = 0; j < args.length; j += 1) {
     const a = args[j] ?? ''
     if (a === '--all' || a === '--mirror' || a === '--branches') return DEFAULT_PUSH
+    if (FORCE.test(a) || ['--repo', '--receive-pack', '--exec'].some(o => a === o || a.startsWith(`${o}=`))) isPlain = false
     if (PUSH_VALUE_OPTIONS.has(a)) j += 1
     else if (!a.startsWith('-')) words.push(a)
   }
   if (state.isPushConfigured) return UNREAD_PUSH
+  // Only to origin, by name, with one refspec at most, none forced.
+  if ((words[0] ?? 'origin') !== 'origin' || words.length > 2 || words.some(w => w.startsWith('+'))) isPlain = false
+  // With no remote, git picks one by the current branch's settings: it must be origin, read for the
+  // branch git reads, not one switched to earlier in the command.
+  const isBare = words.length === 0
+  if (isBare && keys.some(key => state.switched.has(key))) isPlain = false
+  // A push to the default branch: held unless plain and to a repository the person listed (whose
+  // folders pushDirs then names, so the caller reads their origin).
+  const toDefault = (): string | undefined => {
+    if (!isPlain) return DEFAULT_PUSH
+    if (ctx.needs !== undefined) {
+      for (const key of keys) ctx.needs.add(key)
+      return undefined // read on, for the folders later pushes need
+    }
+    if (isBare && !keys.every(key => ctx.pushable.remotes?.get(key) === 'origin')) return DEFAULT_PUSH
+    return toPushable(keys, ctx) ? undefined : DEFAULT_PUSH
+  }
   let isCurrent = words.length <= 1
   for (const ref of words.slice(1)) {
     const spec = ref.replace(/^\+/, '')
@@ -370,20 +404,39 @@ function push(args: readonly string[], keys: readonly string[], state: State, ct
     const destination = colon < 0 ? spec : spec.slice(colon + 1) || spec.slice(0, colon) // main: is main
     if (CURRENT_REF.test(destination)) isCurrent = true
     else if (destination.includes('$')) return UNREAD_PUSH // a variable or a substitution
-    else if (DEFAULT_REF.test(destination)) return DEFAULT_PUSH
+    else if (DEFAULT_REF.test(destination) && toDefault() !== undefined) return DEFAULT_PUSH
   }
   if (!isCurrent) return undefined
   if (isElsewhere) return UNREAD_PUSH
+  if (isPlain && ctx.needs !== undefined) for (const key of keys) ctx.needs.add(key)
   for (const key of keys) {
     for (const maybe of state.switched.get(key) ?? [READ]) {
       if (maybe === READ && ctx.needs !== undefined) ctx.needs.add(key)
       if (ctx.needs !== undefined) continue
       const branch = maybe === READ ? ctx.branches.get(key) : maybe
       if (branch === undefined || branch === UNKNOWN) return UNREAD_PUSH
-      if (DEFAULT_BRANCH.test(branch)) return DEFAULT_PUSH
+      if (DEFAULT_BRANCH.test(branch) && toDefault() !== undefined) return DEFAULT_PUSH
     }
   }
   return undefined
+}
+
+// Push options that may overwrite what the remote has.
+const FORCE = /^(-f|--force|--force-with-lease(=.*)?|--force-if-includes|-[a-zA-Z]*f[a-zA-Z]*)$/
+
+// Whether every folder the push may run in has an origin in the person's pushable list.
+function toPushable(keys: readonly string[], ctx: Context): boolean {
+  if (ctx.pushable.repos.size === 0 || keys.length === 0) return false
+  return keys.every(key => {
+    const repo = repoOf(ctx.pushable.origins.get(key) ?? '')
+    return repo !== undefined && ctx.pushable.repos.has(repo)
+  })
+}
+
+// owner/name, lowercase, of a GitHub remote URL in its https, ssh or scp form, with or without .git.
+export function repoOf(url: string): string | undefined {
+  const match = /^(?:(?:https?|ssh|git):\/\/(?:[^@/]+@)?github\.com(?::\d+)?\/|(?:[^@/:]+@)?github\.com:)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(url.trim())
+  return match === null ? undefined : `${match[1]}/${match[2]}`.toLowerCase()
 }
 
 // The branch a checkout or switch moves to: certain for a new branch and for switch, which only

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { heldReason, pushDirs } from '../hooks/guard'
+import { heldReason, pushDirs, repoOf } from '../hooks/guard'
 import { commands } from '../hooks/shell'
 
 // One case per alternative of each rule, so narrowing a rule fails a test.
@@ -561,6 +561,94 @@ describe('a push with no refspec', () => {
     expect(heldReason('git -C other switch main && git push', '', two)).toBeUndefined()
     // a push with a refspec does not depend on the branch
     expect(heldReason('git switch main && git push origin feat/x', '', feat)).toBeUndefined()
+  })
+})
+
+describe('gh pr merge --admin', () => {
+  test('is held in any position; a plain merge passes', () => {
+    for (const command of ['gh pr merge 5 --admin', 'gh pr merge --admin 5 --squash', 'gh pr merge 5 --squash --admin=true', 'gh -R o/r pr merge --admin', 'gh pr merge 5 -b --admin']) {
+      expect(heldReason(command)).toBe('merge that skips branch protection')
+    }
+    for (const command of ['gh pr merge 5 --squash', 'gh pr merge 5 --auto', 'gh pr view 5 --admin']) expect(heldReason(command)).toBeUndefined()
+  })
+})
+
+describe('pushable repositories', () => {
+  const repos = new Set(['erickpaar/paar-orchestration'])
+  const at = (origin: string | undefined, folder = '', remote = 'origin') => ({
+    repos,
+    origins: new Map(origin === undefined ? [] : [[folder, origin]]),
+    remotes: new Map([[folder, remote]]),
+  })
+  const SSH = 'git@github.com:erickPaar/paar-orchestration.git'
+  const main = new Map([['', 'main']])
+  test('reads the repository from https, ssh and .git URLs', () => {
+    for (const url of [
+      'https://github.com/erickPaar/paar-orchestration',
+      'https://github.com/erickPaar/paar-orchestration.git',
+      'https://x-access-token@github.com/erickPaar/paar-orchestration.git/',
+      SSH,
+      'git@github.com:erickPaar/paar-orchestration',
+      'ssh://git@github.com/erickPaar/paar-orchestration.git',
+      'ssh://git@github.com:22/erickPaar/paar-orchestration',
+    ]) expect(repoOf(url)).toBe('erickpaar/paar-orchestration')
+    for (const url of ['', 'https://gitlab.com/erickPaar/paar-orchestration', 'git@github-work:erickPaar/paar-orchestration.git', '/srv/paar-orchestration.git', 'https://github.com/erickPaar/paar-orchestration/extra']) {
+      expect(repoOf(url)).toBeUndefined()
+    }
+  })
+  test('a plain push to main of a listed repository passes', () => {
+    for (const url of ['https://github.com/erickPaar/paar-orchestration', 'https://github.com/erickPaar/paar-orchestration.git', SSH]) {
+      for (const command of ['git push', 'git push origin', 'git push origin main', 'git push origin HEAD', 'git push -u origin master', 'git push origin HEAD:main', 'git push origin refs/heads/main', 'git commit -m x && git push']) {
+        expect(heldReason(command, '', main, at(url))).toBeUndefined()
+      }
+    }
+    expect(heldReason('git -C orch push origin main', '', new Map(), at(SSH, 'orch'))).toBeUndefined()
+    expect(heldReason('git checkout main && git push origin', '', new Map([['', 'feat/x']]), at(SSH))).toBeUndefined()
+  })
+  test('a push with no remote passes only when git sends it to origin', () => {
+    expect(heldReason('git push', '', main, at(SSH, '', 'origin'))).toBeUndefined()
+    expect(heldReason('git push -u', '', main, at(SSH, '', 'origin'))).toBeUndefined()
+    expect(heldReason('git push', '', main, at(SSH, '', 'upstream'))).toBe('push to the default branch')
+    expect(heldReason('git push', '', main, { repos, origins: new Map([['', SSH]]) })).toBe('push to the default branch')
+    // the remote was read for the branch git reads, not one switched to in the command
+    expect(heldReason('git checkout main && git push', '', new Map([['', 'feat/x']]), at(SSH))).toBe('push to the default branch')
+    // with a remote named, the branch's push remote does not matter
+    expect(heldReason('git push origin', '', main, at(SSH, '', 'upstream'))).toBeUndefined()
+  })
+  test('another repository or an unreadable remote is held', () => {
+    expect(heldReason('git push', '', main, at('git@github.com:erickPaar/ecc.git'))).toBe('push to the default branch')
+    expect(heldReason('git push origin main', '', main, at('https://github.com/paarpet/paar-orchestration'))).toBe('push to the default branch')
+    expect(heldReason('git push origin main', '', main, at(undefined))).toBe('push to the default branch')
+    expect(heldReason('git push origin main', '', main, at(SSH, 'other'))).toBe('push to the default branch')
+    expect(heldReason('git push origin main', '', main, { repos: new Set(), origins: new Map([['', SSH]]) })).toBe('push to the default branch')
+    // every folder the push may run in must be listed
+    expect(heldReason('cd elsewhere && git push origin main', '', main, at(SSH))).toBe('push to the default branch')
+  })
+  test('force, many branches, settings and other remotes stay held', () => {
+    for (const command of [
+      'git push -f', 'git push --force origin main', 'git push origin +main', 'git push --force-with-lease origin main',
+      'git push --force-with-lease=main:abc origin main', 'git push --force-if-includes origin main', 'git push -uf origin main',
+      'git push --all origin', 'git push --mirror origin', 'git push --branches', 'git push origin :', "git push origin 'refs/heads/*'",
+      'git push origin main feat/x',
+      'git push upstream main', 'git push https://github.com/erickPaar/paar-orchestration main', 'git push --repo=origin main',
+      'git push --receive-pack=x origin main',
+      'git -c remote.origin.url=x push origin main', 'git config remote.origin.url x && git push origin main',
+      'git remote set-url origin git@github.com:o/r.git && git push origin main', 'git remote add origin2 x && git push',
+      'GIT_DIR=/srv/.git git push origin main', 'git --git-dir=/srv/.git push origin main',
+    ]) {
+      expect(heldReason(command, '', main, at(SSH))).toBeDefined()
+    }
+    // a read of the remote changes nothing
+    expect(heldReason('git remote -v && git push', '', main, at(SSH))).toBeUndefined()
+    expect(heldReason('git remote get-url origin && git push', '', main, at(SSH))).toBeUndefined()
+  })
+  test('names the folders whose origin it needs', () => {
+    expect(pushDirs('git push origin main')).toEqual([''])
+    expect(pushDirs('git -C orch push origin main')).toEqual(['orch'])
+    expect(pushDirs('git push -f origin main')).toEqual([])
+    expect(pushDirs('git push upstream main')).toEqual([])
+    expect(pushDirs('git switch main && git push origin')).toEqual([''])
+    expect(pushDirs('git switch main && git push -f')).toEqual([])
   })
 })
 
