@@ -2019,5 +2019,257 @@
     "file": "mods/owner-queue/hooks/guard.ts",
     "find": "    const to = sub === 'branch' ? renamed(rest) : switchTarget(sub, rest)",
     "replace": "    const to = sub === 'branch' ? undefined : switchTarget(sub, rest)"
+  },
+  {
+    "label": "side-panel: a review names at least 7 characters of the head",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "[0-9a-f]{7,40}",
+    "replace": "[0-9a-f]{6,40}"
+  },
+  {
+    "label": "side-panel: a review names this head, not another",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "sha.toLowerCase().startsWith(s)",
+    "replace": "true"
+  },
+  {
+    "label": "side-panel: a SHA inside a longer hex word does not count",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "/\\b[0-9a-f]{7,40}\\b/g",
+    "replace": "/[0-9a-f]{7,40}/g"
+  },
+  {
+    "label": "side-panel: the review pattern must match too",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "return new RegExp(word, 'i').test(body)",
+    "replace": "return true"
+  },
+  {
+    "label": "side-panel: the review pattern ignores case",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "new RegExp(word, 'i')",
+    "replace": "new RegExp(word)"
+  },
+  {
+    "label": "side-panel: an asked head is the same head",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "a.key === key(pull) && ",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: the prompt names the short head",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": ".replaceAll('{sha}', () => pull.sha.slice(0, 7))",
+    "replace": ".replaceAll('{sha}', () => pull.sha)"
+  },
+  {
+    "label": "side-panel: a line's marker sets its colour",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "line.startsWith('●') ? 'red'",
+    "replace": "line.startsWith('●') ? undefined"
+  },
+  {
+    "label": "side-panel: repositories are owner/name",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "/^[\\w.-]+\\/[\\w.-]+$/",
+    "replace": "/./"
+  },
+  {
+    "label": "side-panel: the refresh is at least 15 seconds",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "n >= 15 ? n : 60",
+    "replace": "n >= 1 ? n : 60"
+  },
+  {
+    "label": "side-panel: only the sessions the setting names",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "return new RegExp(cfg.sessions).test(name)",
+    "replace": "return true"
+  },
+  {
+    "label": "side-panel: a bad sessions pattern shows nowhere",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "  } catch {\n    return false\n  }\n}\n\nfunction tick",
+    "replace": "  } catch {\n    return true\n  }\n}\n\nfunction tick"
+  },
+  {
+    "label": "side-panel: nothing to show, no pane",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "hasContent && (await isMine($))",
+    "replace": "(await isMine($))"
+  },
+  {
+    "label": "side-panel: the pane reads again on the timer",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "$.clock.every(cfg.every * 1000, () => void readBoard($))",
+    "replace": "void cfg.every"
+  },
+  {
+    "label": "side-panel: Review only on a head nobody reviewed",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "{seen === 'new' && (",
+    "replace": "{true && ("
+  },
+  {
+    "label": "side-panel: Review records the asked head",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "await update($, asked, list => [...list.filter(a => a.key !== key(pull)), { key: key(pull), at: pressed }].slice(-200))",
+    "replace": "void asked"
+  },
+  {
+    "label": "side-panel: a failing repository doesn't hide the others",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "      continue\n    }\n    try {",
+    "replace": "      break\n    }\n    try {"
+  },
+  {
+    "label": "side-panel: a gh failure is shown",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "...(errors.length > 0 ? { error: errors.join('; ') } : {})",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: only a reviewer's comment counts",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "reviewers.includes(c.author?.login ?? '') && ",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: a PR review counts like a comment",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "[...(pr.comments ?? []), ...(pr.reviews ?? [])]",
+    "replace": "[...(pr.comments ?? [])]"
+  },
+  {
+    "label": "side-panel: gh is asked for reviews",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "'number,headRefOid,isDraft,title,comments,reviews'",
+    "replace": "'number,headRefOid,isDraft,title,comments'"
+  },
+  {
+    "label": "side-panel: a bad review pattern is matched as text",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "return body.toLowerCase().includes(word.toLowerCase())",
+    "replace": "return false"
+  },
+  {
+    "label": "side-panel: a bad review pattern still has to match",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "return body.toLowerCase().includes(word.toLowerCase())",
+    "replace": "return true"
+  },
+  {
+    "label": "side-panel: a title is written as it is",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": ".replaceAll('{title}', () => pull.title)",
+    "replace": ".replaceAll('{title}', pull.title)"
+  },
+  {
+    "label": "side-panel: an asked head shows Review again after ten minutes",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "now - a.at < ASKED_FOR",
+    "replace": "true"
+  },
+  {
+    "label": "side-panel: a refresh of 15 seconds is kept",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "n >= 15 ? n : 60",
+    "replace": "n > 15 ? n : 60"
+  },
+  {
+    "label": "side-panel: an empty reviewers setting names nobody",
+    "file": "mods/side-panel/hooks/panel.ts",
+    "find": "setting.split(/\\s+/).filter(login => login !== '')",
+    "replace": "setting.split(/\\s+/)"
+  },
+  {
+    "label": "side-panel: a command that cannot start is a failure, not a crash",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "  try {\n    return await $.process.run(argv)\n  } catch (err) {\n    return { exitCode: null, stdout: '', stderr: err instanceof Error ? err.message : String(err) }\n  }",
+    "replace": "  return await $.process.run(argv)"
+  },
+  {
+    "label": "side-panel: an empty stderr still gives a reason",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "ran.stderr.trim().split('\\n')[0] || otherwise",
+    "replace": "ran.stderr.trim().split('\\n')[0] ?? otherwise"
+  },
+  {
+    "label": "side-panel: empty reviewers means your own login",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "  return [me]\n",
+    "replace": "  return []\n"
+  },
+  {
+    "label": "side-panel: your login is read once",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "    me = login\n",
+    "replace": "    void login\n"
+  },
+  {
+    "label": "side-panel: an unreadable login is shown",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "      errors.push(`reviewers: ${reason(ran, 'no login from gh')}`)\n",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: gh lists up to 100",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "'--limit', '100', ",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: unreadable gh JSON is shown",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "      errors.push(`${repo}: unreadable answer from gh`)\n",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: a sections failure is shown",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "    else errors.push(`sections: ${ran.exitCode === null ? reason(ran, 'did not run') : `exit ${ran.exitCode}`}`)\n",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: CZW_SESSION names the session",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": " || ((await $.env.get('CZW_SESSION')) ?? '')",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: the title comes before CZW_SESSION",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "(await read($, title)) || ",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: one refresh timer",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "  if (isTicking) return\n",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: /panel starts the refresh",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "    await $.ui.open({ id: PANE, title: 'panel' })\n    tick($)\n",
+    "replace": "    await $.ui.open({ id: PANE, title: 'panel' })\n"
+  },
+  {
+    "label": "side-panel: /panel reads before it shows",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "    await readBoard($)\n    await $.ui.open({ id: PANE, title: 'panel' })\n",
+    "replace": "    await $.ui.open({ id: PANE, title: 'panel' })\n"
+  },
+  {
+    "label": "side-panel: drafts come last",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "{[...open, ...drafts].map(",
+    "replace": "{now.pulls.map("
+  },
+  {
+    "label": "side-panel: only an interactive session reads and shows",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "if (e.isInteractive && hasContent && ",
+    "replace": "if (hasContent && "
   }
 ]

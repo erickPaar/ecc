@@ -1,0 +1,50 @@
+{
+  "name": "side-panel",
+  "version": "0.1.0",
+  "description": "A pane beside the transcript of the sessions you name: the open pull requests of your repositories, each new head with a Review button, and sections your own command prints (other sessions, CI minutes, what needs you).",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "sessions": {
+      "type": "string",
+      "title": "Sessions",
+      "description": "A regular expression of the session names that show the pane: the name czw sets in CZW_SESSION (or the session's title, where the engine passes one). Empty shows it in every session.",
+      "default": ""
+    },
+    "repos": {
+      "type": "string",
+      "title": "Repositories",
+      "description": "The repositories whose open pull requests the pane lists, as owner/name separated by spaces. Empty lists none.",
+      "default": ""
+    },
+    "reviewed": {
+      "type": "string",
+      "title": "Review comment",
+      "description": "A regular expression (case-insensitive) a pull request comment must match, beside naming the head's short SHA, for that head to count as reviewed (for example Verdict|Review). Empty counts any reviewer's comment that names the head. A pattern that does not compile is matched as plain text.",
+      "default": ""
+    },
+    "reviewers": {
+      "type": "string",
+      "title": "Reviewers",
+      "description": "The GitHub logins whose comments and reviews count as reviews, separated by spaces. Empty means your own login, as gh is logged in.",
+      "default": ""
+    },
+    "review_prompt": {
+      "type": "string",
+      "title": "Review prompt",
+      "description": "What Review sends to the session, once it is idle, as if you typed it. {repo}, {number}, {sha} and {title} are filled in; {title} is written by whoever opened the pull request, so use it only for repositories whose authors you trust.",
+      "default": "Review {repo}#{number} at head {sha} and post the verdict on the pull request, naming the head."
+    },
+    "sections": {
+      "type": "string",
+      "title": "Sections command",
+      "description": "A command whose output the pane shows below the pull requests: a line starting with ## is a heading; a line starting with ● is shown red, ✓ green, ⠋ blue. Empty shows none.",
+      "default": ""
+    },
+    "every": {
+      "type": "string",
+      "title": "Refresh (seconds)",
+      "description": "How often the pane reads GitHub and the sections command; under 15 means 60.",
+      "default": "60"
+    }
+  }
+}

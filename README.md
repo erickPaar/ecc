@@ -107,6 +107,51 @@ If the engine shortens a long `!` output and drops its last line, the marker is 
 
 The account's permissions are the control; the guard doesn't replace them. ecc's prod guard (above) is separate and narrower. It asks before infrastructure applies, destroys and state edits, and before AWS deletions, on Bash only. It does not cover AWS writes, uploads, GitHub settings or workflows.
 
+## side-panel (a mod)
+
+A third plugin, `side-panel@erick`: a pane beside the transcript, for the session you coordinate from.
+
+- **Open pull requests** of the repositories you name, each with its head's short SHA: ✔ when a reviewer's comment or review names that head and matches your review pattern, ● when nobody reviewed it yet, with a **Review** button. Review sends your review prompt to the session once it is idle, as if you typed it, and the head shows … until the comment arrives (or ten minutes pass, when Review shows again). Drafts come last.
+- **Sections** that your own command prints below them: other sessions, budgets, what waits on you. A line starting with `## ` is a heading; `●` is drawn red, `✓` green, `⠋` blue.
+- It reads GitHub with `gh` (logged in) and runs your command every `every` seconds, only in the sessions whose name matches `sessions`. `/panel` opens it anywhere and starts the refresh there.
+
+```
+/plugin install side-panel@erick
+```
+
+| Setting | Effect |
+|---------|--------|
+| `sessions` | a regular expression of the session names that show the pane: the name czw sets in `CZW_SESSION` when it starts claude (or the session's title, where the engine passes one); without czw, `export CZW_SESSION=<name>` before starting claude. Empty shows it in every session. A headless `claude -p` never shows it, even when it inherits a matching `CZW_SESSION` |
+| `repos` | `owner/name` of the repositories, separated by spaces |
+| `reviewed` | a regular expression (case-insensitive) a comment must match, beside naming the head, to count as a review, for example `Verdict\|Review`; a pattern that does not compile is matched as plain text |
+| `reviewers` | the GitHub logins whose comments and reviews count, separated by spaces; empty means your own (`gh api user`). Anyone can comment on a public repository |
+| `review_prompt` | what Review sends, as if you typed it; `{repo}`, `{number}`, `{sha}` and `{title}` are filled in. `{title}` is written by whoever opened the pull request: use it only for repositories whose authors you trust |
+| `sections` | the command whose output shows below the pull requests, run with `bash -c` |
+| `every` | seconds between reads (default 60; under 15 means 60) |
+
+Set them in `/plugin`, or in `~/.claude/settings.json`:
+
+```json
+"pluginConfigs": {
+  "side-panel@erick": {
+    "options": {
+      "sessions": "coordinator",
+      "repos": "my-org/api my-org/infra",
+      "reviewed": "Verdict",
+      "sections": "~/bin/panel-sections.sh"
+    }
+  }
+}
+```
+
+A sections command is any script that prints lines; keep it fast, it runs on every refresh:
+
+```bash
+#!/usr/bin/env bash
+echo "## Disk"
+df -h --output=pcent / | tail -1 | awk '{ print ($1 + 0 > 90 ? "● " : "✓ ") $1 " used" }'
+```
+
 ## Upstream
 
 `upstream.lock` records, for each imported file, the ECC commit it came from and its
