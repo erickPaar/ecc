@@ -2595,5 +2595,29 @@
     "file": "mods/owner-queue/hooks/guard.ts",
     "find": "if (group === 'pr' && verb === 'merge' && args",
     "replace": "if (args"
+  },
+  {
+    "label": "owner-queue: pushable bare push only to origin",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if (isBare && !keys.every(key => ctx.pushable.remotes?.get(key) === 'origin')) return DEFAULT_PUSH",
+    "replace": "if (false) return DEFAULT_PUSH"
+  },
+  {
+    "label": "owner-queue: pushable bare push after a switch held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if (isBare && keys.some(key => state.switched.has(key))) isPlain = false",
+    "replace": "if (false) isPlain = false"
+  },
+  {
+    "label": "owner-queue: pushable push remote order",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "[`branch.${branch}.pushRemote`, 'remote.pushDefault', `branch.${branch}.remote`]",
+    "replace": "['remote.pushDefault', `branch.${branch}.pushRemote`, `branch.${branch}.remote`]"
+  },
+  {
+    "label": "owner-queue: pushable push remote read",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (branch !== undefined) remotes.set(dir, await pushRemote($, path, branch))",
+    "replace": "if (branch !== undefined) remotes.set(dir, 'origin')"
   }
 ]

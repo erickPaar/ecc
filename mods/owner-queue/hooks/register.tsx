@@ -100,7 +100,8 @@ async function prune($: Engine): Promise<void> {
 async function branches($: Engine, command: string, repos: ReadonlySet<string>): Promise<{ found: Map<string, string>; pushable: Pushable }> {
   const found = new Map<string, string>()
   const origins = new Map<string, string>()
-  const pushable = { repos, origins }
+  const remotes = new Map<string, string>()
+  const pushable = { repos, origins, remotes }
   const dirs = pushDirs(command)
   if (dirs.length === 0) return { found, pushable }
   const cwd = await $.session.cwd()
@@ -113,12 +114,23 @@ async function branches($: Engine, command: string, repos: ReadonlySet<string>):
       if (repos.size > 0) {
         const origin = await $.process.run(['git', '-C', path, 'remote', 'get-url', 'origin'])
         if (origin.exitCode === 0 && origin.stdout.trim() !== '') origins.set(dir, origin.stdout.trim())
+        const branch = found.get(dir)
+        if (branch !== undefined) remotes.set(dir, await pushRemote($, path, branch))
       }
     } catch {
       // Left out: the push is held.
     }
   }
   return { found, pushable }
+}
+
+// Where a push with no remote goes from this branch, as git picks it.
+async function pushRemote($: Engine, path: string, branch: string): Promise<string> {
+  for (const key of [`branch.${branch}.pushRemote`, 'remote.pushDefault', `branch.${branch}.remote`]) {
+    const ran = await $.process.run(['git', '-C', path, 'config', '--get', key])
+    if (ran.exitCode === 0 && ran.stdout.trim() !== '') return ran.stdout.trim()
+  }
+  return 'origin'
 }
 
 export const register: Register = (on, options) => {

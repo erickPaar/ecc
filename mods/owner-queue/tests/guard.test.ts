@@ -575,7 +575,11 @@ describe('gh pr merge --admin', () => {
 
 describe('pushable repositories', () => {
   const repos = new Set(['erickpaar/paar-orchestration'])
-  const at = (origin: string | undefined, folder = '') => ({ repos, origins: new Map(origin === undefined ? [] : [[folder, origin]]) })
+  const at = (origin: string | undefined, folder = '', remote = 'origin') => ({
+    repos,
+    origins: new Map(origin === undefined ? [] : [[folder, origin]]),
+    remotes: new Map([[folder, remote]]),
+  })
   const SSH = 'git@github.com:erickPaar/paar-orchestration.git'
   const main = new Map([['', 'main']])
   test('reads the repository from https, ssh and .git URLs', () => {
@@ -599,7 +603,17 @@ describe('pushable repositories', () => {
       }
     }
     expect(heldReason('git -C orch push origin main', '', new Map(), at(SSH, 'orch'))).toBeUndefined()
-    expect(heldReason('git checkout main && git push', '', new Map([['', 'feat/x']]), at(SSH))).toBeUndefined()
+    expect(heldReason('git checkout main && git push origin', '', new Map([['', 'feat/x']]), at(SSH))).toBeUndefined()
+  })
+  test('a push with no remote passes only when git sends it to origin', () => {
+    expect(heldReason('git push', '', main, at(SSH, '', 'origin'))).toBeUndefined()
+    expect(heldReason('git push -u', '', main, at(SSH, '', 'origin'))).toBeUndefined()
+    expect(heldReason('git push', '', main, at(SSH, '', 'upstream'))).toBe('push to the default branch')
+    expect(heldReason('git push', '', main, { repos, origins: new Map([['', SSH]]) })).toBe('push to the default branch')
+    // the remote was read for the branch git reads, not one switched to in the command
+    expect(heldReason('git checkout main && git push', '', new Map([['', 'feat/x']]), at(SSH))).toBe('push to the default branch')
+    // with a remote named, the branch's push remote does not matter
+    expect(heldReason('git push origin', '', main, at(SSH, '', 'upstream'))).toBeUndefined()
   })
   test('another repository or an unreadable remote is held', () => {
     expect(heldReason('git push', '', main, at('git@github.com:erickPaar/ecc.git'))).toBe('push to the default branch')
@@ -633,7 +647,7 @@ describe('pushable repositories', () => {
     expect(pushDirs('git -C orch push origin main')).toEqual(['orch'])
     expect(pushDirs('git push -f origin main')).toEqual([])
     expect(pushDirs('git push upstream main')).toEqual([])
-    expect(pushDirs('git switch main && git push')).toEqual([''])
+    expect(pushDirs('git switch main && git push origin')).toEqual([''])
     expect(pushDirs('git switch main && git push -f')).toEqual([])
   })
 })

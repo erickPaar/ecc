@@ -11,9 +11,11 @@ import { commands, handedOver, program, runsElsewhere, TooDeep, Unclosed, unwrap
 // a folder missing here holds the push.
 export type Branches = ReadonlyMap<string, string>
 
-// The repositories (owner/name) whose default branch the sessions may push to, and the origin URL of
-// each folder a push runs in, read like the branches; a folder missing here holds the push.
-export type Pushable = { repos: ReadonlySet<string>; origins: ReadonlyMap<string, string> }
+// The repositories (owner/name) whose default branch the sessions may push to, the origin URL of
+// each folder a push runs in, and the remote a push with no remote goes to there (branch.<b>.pushRemote,
+// else remote.pushDefault, else branch.<b>.remote, else origin), read like the branches; a folder
+// missing here holds the push.
+export type Pushable = { repos: ReadonlySet<string>; origins: ReadonlyMap<string, string>; remotes?: ReadonlyMap<string, string> }
 
 type Context = { extra: RegExp | undefined; branches: Branches; pushable: Pushable; needs?: Set<string> }
 
@@ -379,6 +381,10 @@ function push(args: readonly string[], keys: readonly string[], state: State, ct
   if (state.isPushConfigured) return UNREAD_PUSH
   // Only to origin, by name, with one refspec at most, none forced.
   if ((words[0] ?? 'origin') !== 'origin' || words.length > 2 || words.some(w => w.startsWith('+'))) isPlain = false
+  // With no remote, git picks one by the current branch's settings: it must be origin, read for the
+  // branch git reads, not one switched to earlier in the command.
+  const isBare = words.length === 0
+  if (isBare && keys.some(key => state.switched.has(key))) isPlain = false
   // A push to the default branch: held unless plain and to a repository the person listed (whose
   // folders pushDirs then names, so the caller reads their origin).
   const toDefault = (): string | undefined => {
@@ -387,6 +393,7 @@ function push(args: readonly string[], keys: readonly string[], state: State, ct
       for (const key of keys) ctx.needs.add(key)
       return undefined // read on, for the folders later pushes need
     }
+    if (isBare && !keys.every(key => ctx.pushable.remotes?.get(key) === 'origin')) return DEFAULT_PUSH
     return toPushable(keys, ctx) ? undefined : DEFAULT_PUSH
   }
   let isCurrent = words.length <= 1
