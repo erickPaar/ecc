@@ -2463,5 +2463,137 @@
     "file": "scripts/hooks/gateguard-fact-force.js",
     "find": "retry the exact same command: a changed command is a new one and is gated again.",
     "replace": "retry the same operation."
+  },
+  {
+    "label": "owner-queue: pushable force flags stay held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if (FORCE.test(a) || [",
+    "replace": "if (FORCE.test('') || ["
+  },
+  {
+    "label": "owner-queue: pushable --force-with-lease stays held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|--force-with-lease(=.*)?|",
+    "replace": "|"
+  },
+  {
+    "label": "owner-queue: pushable --repo stays held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "['--repo', '--receive-pack', '--exec'].some(",
+    "replace": "[].some("
+  },
+  {
+    "label": "owner-queue: pushable only to origin",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if ((words[0] ?? 'origin') !== 'origin' || words.length",
+    "replace": "if (words.length"
+  },
+  {
+    "label": "owner-queue: pushable one refspec at most",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": " || words.length > 2 || ",
+    "replace": " || "
+  },
+  {
+    "label": "owner-queue: pushable +refspec stays held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": " || words.some(w => w.startsWith('+'))) isPlain",
+    "replace": ") isPlain"
+  },
+  {
+    "label": "owner-queue: pushable git remote changes hold",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "let isPlain = !isElsewhere && !state.isRemoteChanged",
+    "replace": "let isPlain = !isElsewhere"
+  },
+  {
+    "label": "owner-queue: pushable git remote reads pass",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "!['', 'show', 'get-url'].includes(",
+    "replace": "!['', 'show'].includes("
+  },
+  {
+    "label": "owner-queue: pushable elsewhere stays held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "let isPlain = !isElsewhere && !state.isRemoteChanged",
+    "replace": "let isPlain = !state.isRemoteChanged"
+  },
+  {
+    "label": "owner-queue: pushable only listed repositories",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "return repo !== undefined && ctx.pushable.repos.has(repo)",
+    "replace": "return repo !== undefined"
+  },
+  {
+    "label": "owner-queue: pushable every folder listed",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "return keys.every(key => {",
+    "replace": "return keys.some(key => {"
+  },
+  {
+    "label": "owner-queue: pushable .git stripped",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "([\\w.-]+?)(?:\\.git)?\\/?$",
+    "replace": "([\\w.-]+?)\\/?$"
+  },
+  {
+    "label": "owner-queue: pushable scp form read",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "|(?:[^@/:]+@)?github\\.com:)",
+    "replace": "|NOPE:)"
+  },
+  {
+    "label": "owner-queue: pushable ssh scheme read",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "(?:https?|ssh|git):",
+    "replace": "(?:https?|git):"
+  },
+  {
+    "label": "owner-queue: pushable repositories case-insensitive",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "`${match[1]}/${match[2]}`.toLowerCase()",
+    "replace": "`${match[1]}/${match[2]}`"
+  },
+  {
+    "label": "owner-queue: pushable names the folders of a refspec push",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "for (const key of keys) ctx.needs.add(key)\n      return undefined",
+    "replace": "return undefined"
+  },
+  {
+    "label": "owner-queue: pushable names the folders of a switched push",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if (isPlain && ctx.needs !== undefined) for (const key of keys) ctx.needs.add(key)",
+    "replace": "if (false) for (const key of keys) ctx.needs.add(key)"
+  },
+  {
+    "label": "owner-queue: pushable origin read with git",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (repos.size > 0) {",
+    "replace": "if (false) {"
+  },
+  {
+    "label": "owner-queue: pushable setting case-insensitive",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": ".filter(r => r !== '').map(r => r.toLowerCase())",
+    "replace": ".filter(r => r !== '')"
+  },
+  {
+    "label": "owner-queue: gh pr merge --admin held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "args.some(a => a === '--admin' || a.startsWith('--admin='))",
+    "replace": "args.some(a => a.startsWith('--admin='))"
+  },
+  {
+    "label": "owner-queue: gh pr merge --admin= held",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "a === '--admin' || a.startsWith('--admin=')",
+    "replace": "a === '--admin'"
+  },
+  {
+    "label": "owner-queue: --admin only on pr merge",
+    "file": "mods/owner-queue/hooks/guard.ts",
+    "find": "if (group === 'pr' && verb === 'merge' && args",
+    "replace": "if (args"
   }
 ]

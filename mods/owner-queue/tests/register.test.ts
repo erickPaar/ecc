@@ -8,12 +8,12 @@ const OPTIONS = { dir: DIR, pane: 'off' }
 const AUTO = { dir: DIR, pane: 'auto' }
 
 type World = { files: Map<string, string>; copied: string[]; opened: string[]; ran: string[][]; checked: string[] }
-type Setup = { isFull?: boolean; isPlaced?: boolean; branch?: string; env?: Record<string, string>; taken?: number }
+type Setup = { isFull?: boolean; isPlaced?: boolean; branch?: string; origin?: string; env?: Record<string, string>; taken?: number }
 
 // A folder in memory beneath the plugin: what $.fs and $.process.run reach in a session, and the
 // rest of what the plugin asks of a session, answered plainly. `branch` is what git reads as the
-// current branch; without one, git fails. The first `taken` item files asked about exist.
-function world(on: On, { isFull = false, isPlaced = false, branch, env = {}, taken = 0 }: Setup = {}): World {
+// current branch and `origin` the origin's URL; without one, git fails. The first `taken` item files asked about exist.
+function world(on: On, { isFull = false, isPlaced = false, branch, origin, env = {}, taken = 0 }: Setup = {}): World {
   mock.env(on, env)
   const files = new Map<string, string>()
   const ran: string[][] = []
@@ -39,6 +39,7 @@ function world(on: On, { isFull = false, isPlaced = false, branch, env = {}, tak
   on('process.run', (_$, e) => {
     ran.push([...e.argv])
     if (e.argv[0] === 'rm') for (const path of e.argv.slice(2)) files.delete(path)
+    if (e.argv[0] === 'git' && e.argv.includes('get-url')) return { value: origin === undefined ? { exitCode: 2, stdout: '', stderr: 'no such remote' } : { exitCode: 0, stdout: `${origin}\n`, stderr: '' } } as never
     if (e.argv[0] === 'git') return { value: branch === undefined ? { exitCode: 128, stdout: '', stderr: 'not a repository' } : { exitCode: 0, stdout: `${branch}\n`, stderr: '' } } as never
     return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
   })
@@ -171,6 +172,43 @@ describe('the guard reads', () => {
     await start($)
     expect((await $.tool.call({ tool: 'Bash', command: 'git -C sub push' } as never)).deny).toBeUndefined()
     expect(w.ran).toContainEqual(['git', '-C', '/home/x/projects/my-api/sub', 'rev-parse', '--abbrev-ref', 'HEAD'])
+  })
+
+  const PUSHABLE = { ...OPTIONS, pushable: 'other/x erickPaar/paar-orchestration' }
+  test('a push to main of a pushable repository passes, read with git remote get-url', { options: PUSHABLE }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on, { branch: 'main', origin: 'git@github.com:erickpaar/paar-orchestration.git' })
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    expect((await $.tool.call({ tool: 'Bash', command: 'git push' } as never)).deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Bash', command: 'git push origin main' } as never)).deny).toBeUndefined()
+    expect(w.ran).toContainEqual(['git', '-C', '/home/x/projects/my-api', 'remote', 'get-url', 'origin'])
+    expect(String((await $.tool.call({ tool: 'Bash', command: 'git push -f origin main' } as never)).deny)).toContain('push to the default branch')
+  })
+
+  test('a push to main of another repository, or whose origin git cannot read, is held', { options: PUSHABLE }, async ($, on) => {
+    mock.clock(on)
+    world(on, { branch: 'main', origin: 'https://github.com/erickPaar/ecc.git' })
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    expect(String((await $.tool.call({ tool: 'Bash', command: 'git push' } as never)).deny)).toContain('push to the default branch')
+  })
+
+  test('a push to main whose origin git cannot read is held', { options: PUSHABLE }, async ($, on) => {
+    mock.clock(on)
+    world(on, { branch: 'main' })
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    expect(String((await $.tool.call({ tool: 'Bash', command: 'git push origin main' } as never)).deny)).toContain('push to the default branch')
+  })
+
+  test('without pushable, the origin is not read', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on, { branch: 'main', origin: 'git@github.com:erickPaar/paar-orchestration.git' })
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    expect(String((await $.tool.call({ tool: 'Bash', command: 'git push' } as never)).deny)).toContain('push to the default branch')
+    expect(w.ran.some(argv => argv.includes('get-url'))).toBe(false)
   })
 
   test('a push whose branch git cannot read is held', { options: OPTIONS }, async ($, on) => {

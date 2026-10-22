@@ -6,6 +6,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import { pushDirs } from './guard'
+import type { Pushable } from './guard'
 import type { Item } from './queue'
 import { blocker, heldReason, ID, marker, newId, newNonce, stale, TEXT, visible, waitingFor, withMarker } from './queue'
 
@@ -93,12 +94,15 @@ async function prune($: Engine): Promise<void> {
   if (old.length > 0) await $.process.run(['rm', '-f', ...old.map(one => `${ctx.dir}/${one.id}.json`)])
 }
 
-// The current branch of each folder a push in this command needs (guard.ts), read with git. A
-// folder git cannot read is left out, and the guard holds its push.
-async function branches($: Engine, command: string): Promise<Map<string, string>> {
+// The current branch, and the origin URL when the person lists pushable repositories, of each
+// folder a push in this command needs (guard.ts), read with git. A folder git cannot read is left
+// out, and the guard holds its push.
+async function branches($: Engine, command: string, repos: ReadonlySet<string>): Promise<{ found: Map<string, string>; pushable: Pushable }> {
   const found = new Map<string, string>()
+  const origins = new Map<string, string>()
+  const pushable = { repos, origins }
   const dirs = pushDirs(command)
-  if (dirs.length === 0) return found
+  if (dirs.length === 0) return { found, pushable }
   const cwd = await $.session.cwd()
   const home = (await $.env.get('HOME')) ?? ''
   for (const dir of dirs) {
@@ -106,16 +110,21 @@ async function branches($: Engine, command: string): Promise<Map<string, string>
     try {
       const ran = await $.process.run(['git', '-C', path, 'rev-parse', '--abbrev-ref', 'HEAD'])
       if (ran.exitCode === 0 && ran.stdout.trim() !== '') found.set(dir, ran.stdout.trim())
+      if (repos.size > 0) {
+        const origin = await $.process.run(['git', '-C', path, 'remote', 'get-url', 'origin'])
+        if (origin.exitCode === 0 && origin.stdout.trim() !== '') origins.set(dir, origin.stdout.trim())
+      }
     } catch {
       // Left out: the push is held.
     }
   }
-  return found
+  return { found, pushable }
 }
 
 export const register: Register = (on, options) => {
   ctx.paneMode = (options.pane as string) ?? 'auto'
   const extra = (options.held as string) ?? ''
+  const repos = new Set(((options.pushable as string) ?? '').split(/\s+/).filter(r => r !== '').map(r => r.toLowerCase()))
 
   on('session.start', async ($, e, next) => {
     ctx.dir = await folder($, (options.dir as string) ?? '')
@@ -172,7 +181,8 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as { tool: string; command?: unknown; description?: unknown }
     if (input.tool === QUEUE_TOOL || typeof input.command !== 'string') return next(e)
-    const what = heldReason(input.command, extra, await branches($, input.command))
+    const local = await branches($, input.command, repos)
+    const what = heldReason(input.command, extra, local.found, local.pushable)
     if (what === undefined) return next(e)
     const why = typeof input.description === 'string' && input.description !== '' ? input.description : what
     const item = await add($, { command: input.command.trim(), why })

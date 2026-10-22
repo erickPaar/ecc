@@ -21,6 +21,12 @@
       "description": "A regular expression of further commands the model may not run, added to the built-in list (infrastructure applies, AWS writes and deletes, GitHub settings and API writes). Empty adds none.",
       "default": ""
     },
+    "pushable": {
+      "type": "string",
+      "title": "Pushable repositories",
+      "description": "owner/name of the repositories, separated by spaces, whose default branch the sessions may push to: a plain push of the current branch or of main/master to origin passes when the folder's origin is one of them. Force pushes, --all, --mirror and other remotes stay held. Empty holds every push to main/master.",
+      "default": ""
+    },
     "dir": {
       "type": "string",
       "title": "Queue folder",
