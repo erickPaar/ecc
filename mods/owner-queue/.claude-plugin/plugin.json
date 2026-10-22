@@ -1,0 +1,31 @@
+{
+  "name": "owner-queue",
+  "version": "0.1.0",
+  "description": "One queue, in a side pane of every session, of the commands only you run: sessions add to it instead of writing commands in prose, a guard sends held commands there, Copy puts the command on your clipboard, and the item ticks itself when you run it with !.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "pane": {
+      "type": "string",
+      "title": "Pane",
+      "description": "auto opens the pane when something waits for you; command opens it only with /queue; off never opens it (the one-line band above the prompt stays).",
+      "default": "auto",
+      "options": [
+        "auto",
+        "command",
+        "off"
+      ]
+    },
+    "held": {
+      "type": "string",
+      "title": "More held commands",
+      "description": "A regular expression of further commands the model may not run, added to the built-in list (infrastructure applies, AWS writes and deletes, GitHub settings and API writes). Empty adds none.",
+      "default": ""
+    },
+    "dir": {
+      "type": "string",
+      "title": "Queue folder",
+      "description": "Where the queue lives, shared by every session on this machine. Empty is ~/.local/state/owner-queue.",
+      "default": ""
+    }
+  }
+}
