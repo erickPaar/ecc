@@ -1694,13 +1694,17 @@ function isReadOnlyGitIntrospection(command) {
 
 // --- Session scratchpad rm (local to ecc@erick, not upstream ECC) ---
 //
-// Claude Code gives each session a scratchpad at
-// /tmp/claude-<uid>/<project>/<session_id>/scratchpad/, shared by the session's
-// subagents. An `rm` whose every target resolves inside it passes the destructive
-// gate. Anything the hook cannot resolve for certain keeps the gate: `$VAR`,
-// `$(...)`, backticks, escapes, redirections, pipes, `||`, globs above the last
-// path component, and any command in the line other than rm, cd, ls, echo, pwd
-// and true (they could move or link a path between this check and the rm).
+// Claude Code gives each session a scratchpad, shared by the session's
+// subagents, and names it in the hook input's `scratchpad_dir`. An `rm` whose
+// every target resolves inside it passes the destructive gate; without
+// `scratchpad_dir` the gate stays. Anything the hook cannot resolve for certain
+// keeps the gate: `$VAR`, `$(...)`, backticks, escapes, redirections, pipes,
+// `||`, zsh `=cmd`, whitespace other than space and tab, globs above the last
+// path component or at the scratchpad's root (siblings share it), a path
+// relative to a directory the line did not `cd` to by its full name, and any
+// command in the line other than rm, cd, ls, echo, pwd and true (they could
+// move or link a path between this check and the rm). It assumes the shell's
+// builtin `cd` and `rm`, and the hook's HOME.
 
 const SCRATCHPAD_CHAIN_COMMANDS = new Set(['rm', 'cd', 'ls', 'echo', 'pwd', 'true']);
 const SCRATCHPAD_RM_SHORT_FLAGS = /^-[rRfvdiI]+$/;
@@ -1713,12 +1717,13 @@ const SCRATCHPAD_RM_LONG_FLAGS = new Set([
   '--one-file-system',
   '--preserve-root'
 ]);
-const GLOB_CHARS = /[*?[]/;
+// `^` negates in zsh's extendedglob.
+const GLOB_CHARS = /[*?[^]/;
 
 /**
  * Split a command line into simple commands for the scratchpad check. Returns
  * null for anything outside a small literal subset of the shell: words in plain
- * text or quotes, joined by `&&`, `;` or newlines.
+ * text or quotes, separated by spaces or tabs, joined by `&&`, `;` or newlines.
  *
  * @param {string} input
  * @returns {{ words: { text: string, tilde: boolean }[], sep: string }[] | null}
@@ -1765,17 +1770,23 @@ function literalCommandList(input) {
       continue;
     }
     if (/[$`\\(){}<>|&#!~\r]/.test(ch)) {
-      // `~` expands only as an unquoted word start, and only `~` or `~/`.
+      // `~` expands only as an unquoted word start, and only `~` or `~/`: `~user` is another home.
       const next = source[i + 1];
-      if (ch !== '~' || current || (next !== undefined && next !== '/' && !/\s/.test(next))) return null;
+      if (ch !== '~' || current || (next !== undefined && !/[/ \t\n]/.test(next))) return null;
       current = { text: '', tilde: true };
       continue;
     }
-    if (/\s/.test(ch)) {
+    if (ch === ' ' || ch === '\t') {
       flushWord();
       continue;
     }
-    if (!current) current = { text: '', tilde: false };
+    // The shell splits words on space and tab only: a non-breaking space is part of a name.
+    if (/\s/.test(ch)) return null;
+    if (!current) {
+      // zsh expands an unquoted word starting with `=` to a command's path.
+      if (ch === '=') return null;
+      current = { text: '', tilde: false };
+    }
     current.text += ch;
   }
   if (quote) return null;
@@ -1809,6 +1820,11 @@ function literalPath(word, cwd) {
  * Where an rm target lands on disk: the real path of its parent joined with its
  * last component, since rm removes a symlink itself rather than what it points
  * to. With a trailing slash rm follows the link, so the whole path is resolved.
+ * For a glob in the last component, the folder its matches come from.
+ *
+ * Real paths come from `fs.realpathSync.native`, which asks the kernel: the JS
+ * `fs.realpathSync` collapses `link/..` by text before following the link, while
+ * the kernel goes to the parent of the link's target.
  *
  * @param {string} target absolute, as written
  * @returns {string | null}
@@ -1821,57 +1837,55 @@ function resolveRmTarget(target) {
   const base = trimmed.slice(slash + 1);
   if (!base || base === '.' || base === '..' || GLOB_CHARS.test(parent)) return null;
   const trailingSlash = trimmed !== target;
-  if (GLOB_CHARS.test(base) && (base.startsWith('.') || trailingSlash)) return null;
-  let resolved;
+  let realParent;
   try {
-    resolved = path.join(fs.realpathSync(parent), base);
+    realParent = fs.realpathSync.native(parent);
   } catch (_) {
     return null;
   }
+  if (GLOB_CHARS.test(base)) return base.startsWith('.') || trailingSlash ? null : realParent;
   if (trailingSlash) {
     try {
-      resolved = fs.realpathSync(trimmed);
+      return fs.realpathSync.native(trimmed);
     } catch (_) {
       /* nothing there to follow */
     }
   }
-  return resolved;
+  return path.join(realParent, base);
 }
 
 /**
- * The pattern of a path inside this session's scratchpad, or null.
+ * The real path of this session's scratchpad, from the hook input, or null.
  *
  * @param {object} data hook input
- * @returns {RegExp | null}
+ * @returns {string | null}
  */
-function sessionScratchpadPattern(data) {
-  const sessionId = String((data && data.session_id) || '');
-  if (!/^[A-Za-z0-9-]+$/.test(sessionId) || typeof process.getuid !== 'function') return null;
-  let tmp;
+function sessionScratchpad(data) {
+  const dir = data && data.scratchpad_dir;
+  if (typeof dir !== 'string' || !path.isAbsolute(dir)) return null;
   try {
-    tmp = fs.realpathSync('/tmp');
+    return fs.realpathSync.native(dir);
   } catch (_) {
     return null;
   }
-  const escapedTmp = tmp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`^${escapedTmp}/claude-${process.getuid()}/[^/]+/${sessionId}/scratchpad/[^/]`);
 }
 
 /**
  * True when the command only deletes paths inside this session's scratchpad.
+ * The hook input's `cwd` is not used: a relative path needs a `cd` to a full
+ * path before it in the same `&&` chain.
  *
  * @param {string} command
  * @param {object} data hook input
  * @returns {boolean}
  */
 function isScratchpadOnlyRm(command, data) {
-  const scratchpad = sessionScratchpadPattern(data);
+  const scratchpad = sessionScratchpad(data);
   const segments = scratchpad && literalCommandList(command);
   if (!segments) return false;
-  const startCwd = typeof data.cwd === 'string' && path.isAbsolute(data.cwd) ? data.cwd : null;
-  let listCwd = startCwd;
-  let cwd = startCwd;
-  let listHasCd = false;
+  // Strictly inside: never the scratchpad itself, never a sibling named like it.
+  const inside = `${scratchpad}/`;
+  let cwd = null;
   let targets = 0;
 
   for (const { words, sep } of segments) {
@@ -1879,12 +1893,13 @@ function isScratchpadOnlyRm(command, data) {
     if (name.tilde || !SCRATCHPAD_CHAIN_COMMANDS.has(name.text)) return false;
 
     if (name.text === 'cd') {
-      if (args.length > 1 || (args[0] && (args[0].text.startsWith('-') || GLOB_CHARS.test(args[0].text)))) return false;
+      // One argument, a full path or ~, and no `..`: CDPATH and `set -o physical` don't change it.
+      if (args.length > 1) return false;
       const dir = args[0] || { text: '', tilde: true };
-      if (!dir.tilde && !path.isAbsolute(dir.text) && process.env.CDPATH) return false;
+      if (!dir.tilde && !path.isAbsolute(dir.text)) return false;
+      if (GLOB_CHARS.test(dir.text) || dir.text.split('/').includes('..')) return false;
       const next = literalPath(dir, cwd);
       cwd = next ? path.resolve(next) : null;
-      listHasCd = true;
     }
 
     if (name.text === 'rm') {
@@ -1900,17 +1915,13 @@ function isScratchpadOnlyRm(command, data) {
         }
         const target = literalPath(arg, cwd);
         const resolved = target && resolveRmTarget(target);
-        if (!resolved || !scratchpad.test(resolved)) return false;
+        if (!resolved || !resolved.startsWith(inside)) return false;
         targets += 1;
       }
     }
 
     // A failed cd leaves the old directory, so after `;` it is no longer known.
-    if (sep === ';') {
-      if (listHasCd) listCwd = null;
-      cwd = listCwd;
-      listHasCd = false;
-    }
+    if (sep === ';') cwd = null;
   }
   return targets > 0;
 }
