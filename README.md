@@ -118,7 +118,7 @@ A third plugin, `side-panel@erick`: a pane beside the transcript, for the sessio
 - **Sections** that your own command prints below them: other sessions, budgets, what waits on you. A line starting with `## ` is a heading; `●` is drawn red, `✓` green, `⠋` blue.
 - **aws:** time left on the AWS SSO login of `aws_profile` (default `management`), from its `sso_start_url` in `~/.aws/config` and the newest token for it in `~/.aws/sso/cache`; red from 30 minutes before it expires. Then **Queue login** (key `l`) puts `aws sso login --profile <profile>` in owner-queue.
 - **today:** pull requests merged today in `repos` (number, merge commit's short SHA, title, link; one `gh` call per repository, kept two minutes), and the open heads with no review yet.
-- **Keys**, once the pane has the keyboard (Ctrl+X Tab): `1` status, `2` aws, `3` today, each redrawn in the same pane. Esc gives the keyboard back to the prompt. The queue is reached by its own tab (a click, or Tab onto it and Enter); in it, `c` is Copy and `d` is Done on the first item you can act on.
+- **Keys**, once the pane has the keyboard (Ctrl+X Tab): `1` status, `2` aws, `3` today, each redrawn in the same pane, whose tab then reads that view's name; a dim line at the top shows the other views' keys. Esc gives the keyboard back to the prompt. The queue is reached by its own tab (a click, or Tab onto it and Enter); in it, `c` is Copy and `d` is Done on the first item you can act on.
 - It reads GitHub with `gh` (logged in) and runs your command every `every` seconds, only in the sessions whose name matches `sessions`. `/panel` opens the pane anywhere and starts the refresh there.
 
 ```

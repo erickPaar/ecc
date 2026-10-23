@@ -144,26 +144,28 @@ function tick($: Engine): void {
   $.clock.every(cfg.every * 1000, () => void readBoard($))
 }
 
-// The row of views at the top of the pane: keys 1-3 while it has the keyboard switch the view in
-// place; Esc gives the keyboard back. The queue is owner-queue's own pane, its own tab.
+// One dim line at the top of the pane: the keys of the other views (1-3 while the pane has the
+// keyboard) and Esc. The engine's tab shows the current view: a key retitles the pane, which an
+// open of an open id does without opening another or asking for the keyboard.
 function tabs($: Engine, ui: ReturnType<Engine['ui']['resolve']>, current: View) {
   const { Box, Text, Button } = ui
   return (
-    <Box flexDirection="column">
-      <Box>
-        {VIEWS.map(v => (
-          <Box key={`view-${v.name}`} marginRight={2}>
-            {v.name === current ? (
-              <Text bold>
-                {v.key}: {v.name}
-              </Text>
-            ) : (
-              <Button key={`view-${v.name}`} hotkey={v.key} plain label={v.name} onPress={() => update($, view, () => v.name)} />
-            )}
-          </Box>
-        ))}
-      </Box>
-      <Text dimColor>Ctrl+X Tab, then 1-3 · Esc: back to the prompt · queue: its own tab</Text>
+    <Box>
+      {VIEWS.filter(v => v.name !== current).map(v => (
+        <Box key={`view-${v.name}`} marginRight={2}>
+          <Button
+            key={`view-${v.name}`}
+            hotkey={v.key}
+            plain
+            label={v.name}
+            onPress={async () => {
+              await update($, view, () => v.name)
+              await $.ui.open({ id: PANE, title: v.name })
+            }}
+          />
+        </Box>
+      ))}
+      <Text dimColor>Esc: back to the prompt</Text>
     </Box>
   )
 }
@@ -264,7 +266,7 @@ export const register: Register = (on, options) => {
     if (e.isInteractive && hasContent && (await isMine($))) {
       tick($)
       await readBoard($)
-      void $.ui.open({ id: PANE, title: 'status' }).catch(() => undefined)
+      void read($, view).then(name => $.ui.open({ id: PANE, title: name })).catch(() => undefined)
     }
     return next(e)
   })
@@ -281,7 +283,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'panel' }, async $ => {
     await readBoard($)
-    await $.ui.open({ id: PANE, title: 'status' })
+    await $.ui.open({ id: PANE, title: await read($, view) })
     tick($)
     return { text: '' }
   })

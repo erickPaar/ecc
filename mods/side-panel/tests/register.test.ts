@@ -27,6 +27,7 @@ function world(on: On, w: World = {}) {
   const submitted: string[] = []
   const order: string[] = []
   const called: Record<string, unknown>[] = []
+  const titles: string[] = []
   on('fs.read', (_$, e) => {
     if (e.path.endsWith('/.aws/config')) return { value: '[profile management]\nsso_session = s\n[sso-session s]\nsso_start_url = https://p.awsapps.com/start\n' } as never
     if (e.path.endsWith('/t.json') && w.expiresAt !== undefined) return { value: JSON.stringify({ startUrl: 'https://p.awsapps.com/start', expiresAt: w.expiresAt, accessToken: 'x' }) } as never
@@ -63,6 +64,7 @@ function world(on: On, w: World = {}) {
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
   on('ui.open', (_$, e) => {
     opened.push(e.id + (e.focus ? '+focus' : ''))
+    titles.push(e.title ?? '')
     order.push('open')
     return { value: { isPlaced: true } } as never
   })
@@ -71,7 +73,7 @@ function world(on: On, w: World = {}) {
     submitted.push(e.text)
     return { text: e.text } as never
   })
-  return { ran, opened, submitted, order, called }
+  return { ran, opened, submitted, order, called, titles }
 }
 
 type T = Parameters<Parameters<typeof test>[2] & Function>[0]
@@ -371,6 +373,24 @@ describe('views', () => {
     await $.ui.press({ plugin: 'side-panel', key: 'view-status' })
     expect(await drawn($)).toContain('Pull requests')
     expect(w.opened.every(id => id === 'side-panel')).toBe(true)
+  })
+})
+
+describe('the pane title', () => {
+  test('follows the view: a key retitles the one pane, without asking for the keyboard', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on)
+    await start($, 'coordinator')
+    await $.command.run({ command: 'panel', args: '' } as never)
+    expect(w.titles[w.titles.length - 1]).toBe('status')
+    await view($, 'aws')
+    expect(w.titles[w.titles.length - 1]).toBe('aws')
+    await view($, 'today')
+    expect(w.titles[w.titles.length - 1]).toBe('today')
+    expect(w.opened.every(id => id === 'side-panel')).toBe(true)
+    // /panel keeps the title of the view shown
+    await $.command.run({ command: 'panel', args: '' } as never)
+    expect(w.titles[w.titles.length - 1]).toBe('today')
   })
 })
 
