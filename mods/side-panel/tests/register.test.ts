@@ -17,6 +17,9 @@ type World = {
   czw?: string // CZW_SESSION
   expiresAt?: string // the cached SSO token's expiry
   merged?: object[] // what gh answers for merged pull requests
+  runs?: Record<string, object> // run files in ~/.local/state/side-panel/runs, by name
+  agents?: { id: string; status: string }[] // what $.agent.list answers
+  cwdFails?: boolean // $.session.cwd rejects
 }
 
 // What a session answers beneath the plugin: gh, the sections command, the environment and the
@@ -28,12 +31,32 @@ function world(on: On, w: World = {}) {
   const order: string[] = []
   const called: Record<string, unknown>[] = []
   const titles: string[] = []
+  const written = new Map<string, string>()
+  on('fs.write', (_$, e) => {
+    written.set(e.path, e.text)
+    return { value: undefined } as never
+  })
+  on('fs.exists', (_$, e) => ({ value: e.path.endsWith('/runs') && w.runs !== undefined }) as never)
+  let lists = 0
+  on('agent.list', () => {
+    lists += 1
+    return { value: w.agents ?? [] } as never
+  })
+  on('session.cwd', () => {
+    if (w.cwdFails) throw new Error('no cwd')
+    return { value: '/home/x/projects/my-api' } as never
+  })
   on('fs.read', (_$, e) => {
+    const name = e.path.split('/').pop() ?? ''
+    if (e.path.includes('/runs/') && w.runs?.[name] !== undefined) return { value: JSON.stringify(w.runs[name]) } as never
     if (e.path.endsWith('/.aws/config')) return { value: '[profile management]\nsso_session = s\n[sso-session s]\nsso_start_url = https://p.awsapps.com/start\n' } as never
     if (e.path.endsWith('/t.json') && w.expiresAt !== undefined) return { value: JSON.stringify({ startUrl: 'https://p.awsapps.com/start', expiresAt: w.expiresAt, accessToken: 'x' }) } as never
     return { value: '' } as never
   })
-  on('fs.list', () => ({ value: [{ name: 't.json', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] }) as never)
+  on('fs.list', (_$, e) => {
+    const names = e.path?.endsWith('/runs') ? Object.keys(w.runs ?? {}) : ['t.json']
+    return { value: names.map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) } as never
+  })
   on('tool.call', { tool: 'mcp__owner-queue__ask_owner_to_run' }, (_$, e) => {
     called.push({ ...e })
     return { result: 'queued' } as never
@@ -73,7 +96,7 @@ function world(on: On, w: World = {}) {
     submitted.push(e.text)
     return { text: e.text } as never
   })
-  return { ran, opened, submitted, order, called, titles }
+  return { ran, opened, submitted, order, called, titles, written, lists: () => lists }
 }
 
 type T = Parameters<Parameters<typeof test>[2] & Function>[0]
@@ -438,5 +461,89 @@ describe('the today tab', () => {
     expect(mergedReads(w)).toBe(2)
     await clock.advance(60_000)
     expect(mergedReads(w)).toBe(4)
+  })
+})
+
+describe('running', () => {
+  const NOW = Date.parse('2026-10-23T10:00:00Z')
+  const spawn = ($: T, agentId: string) =>
+    $.agent.spawn({ tool_use_id: 'tu1', prompt: 'SECRET prompt text', description: 'Review ecc#9 at 378ff35\nsecond line', subagentType: 'independent-reviewer', background: true, fork: false, parentModel: 'opus' } as never)
+  const lastRun = (w: { written: Map<string, string> }) => JSON.parse([...w.written.values()].pop() ?? '{}') as Record<string, unknown>
+
+  test('a spawn writes its run, label only, whole, and its end marks it done', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }) as never)
+    on('classic.SubagentStop', () => ({}) as never)
+    on('tool.call', { tool: 'Agent' }, () => ({ result: 'ok' }) as never)
+    const w = world(on, { czw: 'orchestrator' })
+    await start($, '')
+    await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', effort: 'medium', description: 'x', prompt: 'p' } as never)
+    await spawn($, 'a1')
+    const path = [...w.written.keys()][0] ?? ''
+    expect(path).toMatch(/\/\.local\/state\/side-panel\/runs\/orchestrator--a1\.json\.tmp$/)
+    expect(w.ran.some(argv => argv[0] === 'mv' && argv[2]!.endsWith('orchestrator--a1.json.tmp') && argv[3]!.endsWith('orchestrator--a1.json'))).toBe(true)
+    expect(lastRun(w)).toMatchObject({ session: 'orchestrator', id: 'a1', label: 'Review ecc#9 at 378ff35 second line', type: 'independent-reviewer', model: 'claude-opus-5-5', effort: 'medium', isBackground: true, status: 'running', started: NOW })
+    expect([...w.written.values()].join()).not.toContain('SECRET')
+    await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'independent-reviewer', stop_hook_active: false, agent_transcript_path: '' } as never)
+    expect(lastRun(w)).toMatchObject({ status: 'done', finished: NOW })
+  })
+
+  test('the heartbeat marks a run alive, and settles it when the agent list says it failed', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }) as never)
+    const setup = { czw: 'orchestrator', agents: [{ id: 'a1', status: 'running' }] }
+    const w = world(on, setup)
+    await start($, '')
+    await spawn($, 'a1')
+    await clock.advance(30_000)
+    expect(lastRun(w)).toMatchObject({ status: 'running', beat: NOW + 30_000 })
+    setup.agents = [{ id: 'a1', status: 'failed' }]
+    await clock.advance(30_000)
+    expect(lastRun(w)).toMatchObject({ status: 'failed', finished: NOW + 60_000 })
+  })
+
+  test('a run the agent list no longer has is settled as stopped, and the beat stops when nothing runs', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }) as never)
+    const w = world(on, { czw: 'orchestrator', agents: [] })
+    await start($, '')
+    await spawn($, 'a1')
+    await clock.advance(30_000)
+    expect(lastRun(w)).toMatchObject({ status: 'stopped', finished: NOW + 30_000 })
+    const asked = w.lists()
+    await clock.advance(5 * 60_000)
+    expect(w.ran.filter(argv => argv[0] === 'mv').length).toBe(2)
+    expect(w.lists()).toBe(asked)
+  })
+
+  test('a spawn whose run cannot be written still answers the spawn', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }) as never)
+    const w = world(on, { cwdFails: true })
+    await start($, '')
+    expect(await spawn($, 'a1')).toMatchObject({ agentId: 'a1' })
+    expect(w.written.size).toBe(0)
+  })
+
+  test('the panel shows the runs by session: running with elapsed time, stale, finished dimmed; old files deleted', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const run = (session: string, id: string, extra: object) => ({ session, id, label: `run ${id}`, type: 'Explore', isBackground: true, started: NOW - 5 * 60_000, status: 'running', beat: NOW - 10_000, ...extra })
+    const w = world(on, {
+      runs: {
+        'api--a1.json': run('api', 'a1', {}),
+        'api--a2.json': run('api', 'a2', { beat: NOW - 10 * 60_000 }),
+        'content--a3.json': run('content', 'a3', { status: 'done', finished: NOW - 20 * 60_000 }),
+        'content--a4.json': run('content', 'a4', { status: 'done', finished: NOW - 2 * 3600_000 }),
+        'content--a5.json': run('content', 'a5', { status: 'failed', finished: NOW - 25 * 3600_000 }),
+        'half.json': {},
+      },
+    })
+    await start($, 'coordinator')
+    const shown = await drawn($)
+    for (const k of ['Running', '"api"', '"content"', '⠋ 5m', 'run a1', '? stale', 'run a2', 'run a3']) expect(shown).toContain(k)
+    expect(shown).not.toContain('run a4')
+    expect(shown).not.toContain('run a5')
+    expect(shown.indexOf('run a1')).toBeLessThan(shown.indexOf('run a3'))
+    expect(w.ran.find(argv => argv[0] === 'rm')).toEqual(['rm', '-f', expect.stringMatching(/content--a5\.json$/)])
   })
 })

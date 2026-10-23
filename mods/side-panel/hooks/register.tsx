@@ -6,8 +6,9 @@
 import { atom, read, update } from 'claude-code'
 import type { Engine, Register } from 'claude-code'
 
-import type { Asked, Aws, Board, Pull, Today } from '../types'
+import type { Asked, Aws, Board, Pull, Run, Today } from '../types'
 import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
+import { BEAT_EVERY, elapsed, fileName, fromAgent, isOld, label, parse, sections as runSections } from './runs'
 
 const PANE = 'side-panel'
 const AWS_PANE = 'side-panel-aws'
@@ -24,6 +25,85 @@ const cfg = { sessions: '', repos: [] as string[], word: '', reviewers: [] as st
 // Your own login, read once from gh when `reviewers` is empty; and whether the refresh timer runs.
 let me: string | undefined
 let isTicking = false
+const runsAtom = atom({ plugin: 'side-panel', key: 'runs' } as const, [] as Run[])
+// The writer: this session's own runs, and the effort each Agent call asked for, by tool_use_id.
+const mine = { dir: '', session: '', runs: new Map<string, Run>(), efforts: new Map<string, string>(), beat: undefined as { cancel: () => void } | undefined }
+
+async function runsDir($: Engine): Promise<string> {
+  return `${(await $.env.get('HOME')) ?? '/tmp'}/.local/state/side-panel/runs`
+}
+
+// Writes one run's file whole: a temporary file, then a rename, so a reader never sees half of it.
+async function writeRun($: Engine, run: Run): Promise<void> {
+  // Only running runs are kept here: a settled one is never written again.
+  if (run.status === 'running') mine.runs.set(run.id, run)
+  else mine.runs.delete(run.id)
+  const path = `${mine.dir}/${fileName(run.session, run.id)}`
+  try {
+    await $.fs.write(`${path}.tmp`, JSON.stringify(run))
+    await $.process.run(['mv', '-f', `${path}.tmp`, path])
+  } catch {
+    // The panel misses this run; the session goes on.
+  }
+}
+
+// Marks this session's running runs alive, and settles the ones the agent list says ended.
+// The agent list drops an agent some time after it ends, so a run missing from it (once it had a
+// beat to show up) has ended without its SubagentStop: stopped, its outcome unknown. The timer stops
+// when nothing runs.
+async function beat($: Engine): Promise<void> {
+  try {
+    const now = await $.clock.now()
+    let listed: Awaited<ReturnType<Engine['agent']['list']>> | undefined
+    try {
+      listed = await $.agent.list()
+    } catch {
+      listed = undefined // cannot tell: only beat
+    }
+    for (const run of [...mine.runs.values()]) {
+      const agent = listed?.find(a => a.id === run.id)
+      const ended = agent !== undefined ? fromAgent(agent.status) : listed !== undefined && now - run.started >= BEAT_EVERY ? 'stopped' : undefined
+      await writeRun($, ended !== undefined ? { ...run, status: ended, finished: now } : { ...run, beat: now })
+    }
+  } catch {
+    // the next beat tries again
+  }
+  if (mine.runs.size === 0) stopBeat()
+}
+
+function stopBeat(): void {
+  mine.beat?.cancel()
+  mine.beat = undefined
+}
+
+async function finish($: Engine, id: string, status: Run['status']): Promise<void> {
+  const run = mine.runs.get(id)
+  if (run === undefined || run.status !== 'running') return
+  await writeRun($, { ...run, status, finished: await $.clock.now() })
+}
+
+// Every session's runs, for the Running section; files a day old are deleted.
+async function readRuns($: Engine): Promise<void> {
+  const dir = await runsDir($)
+  const now = await $.clock.now()
+  const found: Run[] = []
+  const old: string[] = []
+  try {
+    if (await $.fs.exists(dir)) {
+      for (const entry of await $.fs.list(dir)) {
+        if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+        const one = parse(String(await $.fs.read(`${dir}/${entry.name}`)))
+        if (one === undefined) continue
+        if (isOld(one, now)) old.push(`${dir}/${entry.name}`)
+        else found.push(one)
+      }
+    }
+    if (old.length > 0) await run($, ['rm', '-f', ...old])
+  } catch {
+    // shown as last read
+  }
+  await update($, runsAtom, () => found)
+}
 
 type Ran = { exitCode: number | null; stdout: string; stderr: string } // null: never ran, or did not finish
 
@@ -79,6 +159,7 @@ async function readBoard($: Engine): Promise<void> {
   await update($, board, () => ({ pulls: found, lines: shown, ...(errors.length > 0 ? { error: errors.join('; ') } : {}) }))
   await readAws($)
   await readToday($)
+  await readRuns($)
 }
 
 // The AWS login's expiry: the profile's SSO start URL from ~/.aws/config, then the latest token for
@@ -247,7 +328,56 @@ export const register: Register = (on, options) => {
   cfg.profile = awsProfile((options.aws_profile as string) ?? '')
   me = undefined
   isTicking = false
+  stopBeat() // a reload must not double the beats
   const hasContent = cfg.repos.length > 0 || cfg.sections !== ''
+
+  // The writer, in every session that loads the mod: one file per subagent run.
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const input = e as unknown as { tool_use_id?: string; effort?: unknown }
+    if (typeof input.tool_use_id === 'string' && typeof input.effort === 'string') mine.efforts.set(input.tool_use_id, input.effort)
+    return next(e)
+  })
+
+  on('agent.spawn', async ($, e, next) => {
+    const started = await next(e)
+    const id = started.agentId
+    if (id === undefined) return started
+    // The spawn's answer stands whatever happens to its file.
+    try {
+      if (mine.dir === '') mine.dir = await runsDir($)
+      if (mine.session === '') mine.session = (await read($, title)) || (await $.env.get('CZW_SESSION')) || (await $.session.cwd()).split('/').pop() || 'session'
+      const now = await $.clock.now()
+      const effort = mine.efforts.get(e.tool_use_id)
+      mine.efforts.delete(e.tool_use_id)
+      await run($, ['mkdir', '-p', mine.dir])
+      await writeRun($, {
+        session: mine.session,
+        id,
+        label: label(e.description),
+        type: e.subagentType || 'general-purpose',
+        ...(started.model ? { model: started.model } : {}),
+        ...(effort ? { effort } : {}),
+        isBackground: e.background,
+        started: now,
+        beat: now,
+        status: 'running',
+      })
+      if (mine.beat === undefined) mine.beat = $.clock.every(BEAT_EVERY, () => void beat($))
+    } catch {
+      // The panel misses this run.
+    }
+    return started
+  })
+
+  on('classic.SubagentStop', async ($, e, next) => {
+    await finish($, e.agent_id, 'done')
+    return next(e)
+  })
+
+  on('classic.SessionEnd', async ($, e, next) => {
+    for (const id of mine.runs.keys()) await finish($, id, 'stopped')
+    return next(e)
+  })
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'panel', description: 'Show the side panel: pull requests and your sections' })
@@ -308,6 +438,7 @@ export const register: Register = (on, options) => {
     const at = await $.clock.now()
     const open = now.pulls.filter(pull => !pull.isDraft)
     const drafts = now.pulls.filter(pull => pull.isDraft)
+    const running = runSections(await read($, runsAtom), at)
 
     return (
       <Box flexDirection="column" paddingX={1}>
@@ -347,6 +478,29 @@ export const register: Register = (on, options) => {
             </Box>
           )
         })}
+        {running.length > 0 && (
+          <Box marginTop={1}>
+            <Text bold>Running</Text>
+          </Box>
+        )}
+        {running.map(group => (
+          <Box key={`s-${group.session}`} flexDirection="column">
+            <Text color="blue">{group.session}</Text>
+            {group.runs.map(r => (
+              <Text
+                key={`r-${r.session}-${r.id}`}
+                wrap="truncate-end"
+                dimColor={r.status !== 'running'}
+                color={r.isStale || r.status === 'failed' ? 'red' : r.status === 'done' ? 'green' : undefined}
+              >
+                {'  '}
+                {r.status === 'running' ? (r.isStale ? '? stale' : `⠋ ${elapsed(at - r.started)}`) : r.status === 'done' ? '✓' : r.status === 'failed' ? '✗' : '■'} {r.label} · {r.type}
+                {r.model ? ` · ${r.model}` : ''}
+                {r.effort ? ` · ${r.effort}` : ''}
+              </Text>
+            ))}
+          </Box>
+        ))}
         {now.lines.map((line, i) =>
           line.kind === 'heading' ? (
             <Box key={`h${i}`} marginTop={1}>
