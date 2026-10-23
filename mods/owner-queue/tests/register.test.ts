@@ -465,6 +465,34 @@ describe('the tick', () => {
 })
 
 describe('the pane', () => {
+  test('keys: c / d on the first item that can be acted on', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    await ask($, 'make apply STACK=storage')
+    const [first, second] = queued(w)
+    const tree = JSON.parse(await pane($)) as unknown
+    const buttons: { key?: string; hotkey?: string }[] = []
+    const walk = (n: unknown): void => {
+      if (n === null || typeof n !== 'object') return
+      const node = n as { type?: string; props?: { key?: string; hotkey?: string }; children?: unknown[] }
+      if (node.type === 'Button') buttons.push(node.props ?? {})
+      for (const c of node.children ?? []) walk(c)
+    }
+    walk(tree)
+    const hotkey = (key: string) => buttons.find(b => b.key === key)?.hotkey
+    expect(hotkey(`copy-${first!.id}`)).toBe('c')
+    expect(hotkey(`done-${first!.id}`)).toBe('d')
+    expect(hotkey(`copy-${second!.id}`)).toBeUndefined()
+    expect(hotkey(`done-${second!.id}`)).toBeUndefined()
+    expect(await pane($)).toContain('Esc: back to the prompt')
+    // Done on the first moves the keys to the next
+    await $.ui.press({ plugin: 'owner-queue', key: `done-${first!.id}` })
+    walk((buttons.length = 0, JSON.parse(await pane($))))
+    expect(hotkey(`copy-${second!.id}`)).toBe('c')
+  })
+
   test('Copy puts the command with its marker on the clipboard', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: 5000 })
     const w = world(on)
@@ -489,6 +517,31 @@ describe('the pane', () => {
     expect(nth(w)).toMatchObject({ status: 'done' })
     expect(nth(w).nonce).toBeUndefined()
     expect(w.copied).toEqual([])
+  })
+
+  test('c goes to the first item with a command; d to the first item', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, '')
+    await ask($, 'make apply STACK=network')
+    const [decision, command] = queued(w)
+    const drawn = await pane($)
+    expect(drawn).toContain(`"key":"done-${decision!.id}","label":"Done","hotkey":"d"`)
+    expect(drawn).toContain(`"key":"copy-${command!.id}","label":"Copy","hotkey":"c"`)
+    expect(drawn).not.toContain(`"key":"done-${command!.id}","label":"Done","hotkey":"d"`)
+  })
+
+  test('Done on an item removed elsewhere since the pane was drawn leaves it removed', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    const item = nth(w)
+    await pane($)
+    w.files.set(`${DIR}/${item.id}.json`, JSON.stringify({ ...item, status: 'removed', updated: 5000 }))
+    await $.ui.press({ plugin: 'owner-queue', key: `done-${item.id}` })
+    expect(nth(w)).toMatchObject({ status: 'removed' })
   })
 
   test('a decision with no command has Done and Remove, and no Copy', { options: OPTIONS }, async ($, on) => {

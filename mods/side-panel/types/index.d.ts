@@ -12,6 +12,14 @@ export type Line = { kind: 'heading' | 'text'; text: string; tone?: 'red' | 'gre
 
 export type Asked = { key: string; at: number } // a head queued from the pane (repo#number@sha), and when
 
+// A pull request merged today.
+export type Merged = { repo: string; number: number; title: string; url: string; sha: string; at: number }
+
+// The AWS login the aws tab watches: when its token expires, or why that could not be read.
+export type Aws = { profile: string; expiresAt?: number; error?: string; checked: number }
+
+export type Today = { merged: Merged[]; read: number; error?: string } // read: when gh was last asked
+
 export type Board = {
   pulls: Pull[]
   lines: Line[]
@@ -23,6 +31,8 @@ declare module 'claude-code' {
     'side-panel': {
       board: Board
       asked: Asked[] // heads whose review was queued from the pane
+      aws: Aws
+      today: Today
       title: string // the session's title, when the engine passes one; kept across reloads
     }
   }
