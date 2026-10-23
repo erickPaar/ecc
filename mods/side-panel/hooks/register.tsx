@@ -6,12 +6,11 @@
 import { atom, read, update } from 'claude-code'
 import type { Engine, Register } from 'claude-code'
 
-import type { Asked, Aws, Board, Pull, Today } from '../types'
-import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TABS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
+import type { Asked, Aws, Board, Pull, Today, View } from '../types'
+import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, VIEWS, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
 
 const PANE = 'side-panel'
-const AWS_PANE = 'side-panel-aws'
-const TODAY_PANE = 'side-panel-today'
+const view = atom({ plugin: 'side-panel', key: 'view' } as const, 'status' as View)
 const QUEUE_TOOL = 'mcp__owner-queue__ask_owner_to_run'
 const aws = atom({ plugin: 'side-panel', key: 'aws' } as const, { profile: '', checked: 0 } as Aws)
 const todayList = atom({ plugin: 'side-panel', key: 'today' } as const, { merged: [], read: 0 } as Today)
@@ -127,19 +126,6 @@ async function readToday($: Engine): Promise<void> {
   await update($, todayList, () => ({ merged: found.sort((a, b) => b.at - a.at), read: now || 1, ...(errors.length > 0 ? { error: errors.join('; ') } : {}) }))
 }
 
-// Opens the side panel's panes, status first, so the tabs read status, aws, today (and queue).
-async function openPanes($: Engine): Promise<void> {
-  await $.ui.open({ id: PANE, title: 'status' })
-  await $.ui.open({ id: AWS_PANE, title: 'aws' })
-  if (cfg.repos.length > 0) await $.ui.open({ id: TODAY_PANE, title: 'today' })
-}
-
-// Shows one of this plugin's panes and gives it the keyboard.
-async function show($: Engine, pane: string): Promise<void> {
-  const tab = TABS.find(t => t.pane === pane)
-  if (tab !== undefined) await $.ui.open({ id: pane, title: tab.name, focus: true })
-}
-
 // The session's name: its title when the engine passes one, else CZW_SESSION, which czw sets to the
 // session's name when it starts claude.
 async function isMine($: Engine): Promise<boolean> {
@@ -158,23 +144,102 @@ function tick($: Engine): void {
   $.clock.every(cfg.every * 1000, () => void readBoard($))
 }
 
-// The row of tabs at the top of each pane: keys 1-4 while the pane has the keyboard, and Esc.
-function tabs($: Engine, ui: ReturnType<Engine['ui']['resolve']>, current: string) {
+// The row of views at the top of the pane: keys 1-3 while it has the keyboard switch the view in
+// place; Esc gives the keyboard back. The queue is owner-queue's own pane, its own tab.
+function tabs($: Engine, ui: ReturnType<Engine['ui']['resolve']>, current: View) {
   const { Box, Text, Button } = ui
   return (
     <Box flexDirection="column">
       <Box>
-        {TABS.map(t =>
-          t.name === current ? (
-            <Text key={`tab-${t.name}`} bold>
-              {t.key}: {t.name}{'  '}
-            </Text>
-          ) : (
-            <Button key={`tab-${t.name}`} hotkey={t.key} plain label={t.name} onPress={() => (t.pane === 'owner-queue' ? undefined : show($, t.pane))} />
-          ),
-        )}
+        {VIEWS.map(v => (
+          <Box key={`view-${v.name}`} marginRight={2}>
+            {v.name === current ? (
+              <Text bold>
+                {v.key}: {v.name}
+              </Text>
+            ) : (
+              <Button key={`view-${v.name}`} hotkey={v.key} plain label={v.name} onPress={() => update($, view, () => v.name)} />
+            )}
+          </Box>
+        ))}
       </Box>
-      <Text dimColor>Ctrl+X Tab: keys here · Esc: back to the prompt</Text>
+      <Text dimColor>Ctrl+X Tab, then 1-3 · Esc: back to the prompt · queue: its own tab</Text>
+    </Box>
+  )
+}
+
+// The aws view: time left on the SSO login, and the login for the queue when it is close.
+async function awsView($: Engine, ui: ReturnType<Engine['ui']['resolve']>) {
+  const { Box, Text, Button } = ui
+  const login = await read($, aws)
+  const now = await $.clock.now()
+  const isClose = login.expiresAt === undefined || login.expiresAt - now < AWS_WARN
+  const command = `aws sso login --profile ${cfg.profile}`
+  return (
+    <Box flexDirection="column">
+      <Box marginTop={1}>
+        <Text bold>{cfg.profile}</Text>
+        <Text color={isClose ? 'red' : 'green'}>
+          {'  '}
+          {login.expiresAt === undefined ? (login.error ?? 'not read yet') : left(login.expiresAt, now)}
+          {login.expiresAt !== undefined && login.expiresAt > now ? ' left' : ''}
+        </Text>
+      </Box>
+      {isClose && (
+        <Box marginTop={1}>
+          <Button
+            key="aws-login"
+            label="Queue login"
+            hotkey="l"
+            onPress={async () => {
+              try {
+                await $.tool.call({ tool: QUEUE_TOOL, command, why: `AWS login for ${cfg.profile}` } as never)
+                $.ui.toast('AWS login queued')
+              } catch {
+                $.ui.toast('owner-queue is not loaded')
+              }
+            }}
+          />
+          <Text dimColor> {command}</Text>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+// The today view: merged today, and the heads waiting for a first review.
+async function todayView($: Engine, ui: ReturnType<Engine['ui']['resolve']>) {
+  const { Box, Text, Link } = ui
+  const list = await read($, todayList)
+  const waiting = (await read($, board)).pulls.filter(pull => !pull.isDraft && !pull.isReviewed)
+  return (
+    <Box flexDirection="column">
+      <Box marginTop={1}>
+        <Text bold>Merged today</Text>
+      </Box>
+      {list.merged.length === 0 && <Text dimColor>none yet</Text>}
+      {list.merged.map(pr => (
+        <Box key={`m-${pr.repo}#${pr.number}`} flexDirection="column">
+          <Text color="green" wrap="truncate-end">
+            {pr.repo.split('/')[1]}#{pr.number} {pr.sha} {pr.title}
+          </Text>
+          <Link href={pr.url} />
+        </Box>
+      ))}
+      <Box marginTop={1}>
+        <Text bold>Waiting for a first review</Text>
+      </Box>
+      {waiting.length === 0 && <Text dimColor>none</Text>}
+      {waiting.map(pull => (
+        <Text key={`w-${key(pull)}`} color="yellow" wrap="truncate-end">
+          {pull.repo.split('/')[1]}#{pull.number} {pull.sha.slice(0, 7)} {pull.title}
+        </Text>
+      ))}
+      {list.error !== undefined && (
+        <Text dimColor color="red" wrap="truncate-end">
+          {list.error}
+        </Text>
+      )}
     </Box>
   )
 }
@@ -199,7 +264,7 @@ export const register: Register = (on, options) => {
     if (e.isInteractive && hasContent && (await isMine($))) {
       tick($)
       await readBoard($)
-      void openPanes($).catch(() => undefined)
+      void $.ui.open({ id: PANE, title: 'status' }).catch(() => undefined)
     }
     return next(e)
   })
@@ -216,94 +281,9 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'panel' }, async $ => {
     await readBoard($)
-    await openPanes($)
+    await $.ui.open({ id: PANE, title: 'status' })
     tick($)
     return { text: '' }
-  })
-
-  // A tab key pressed in owner-queue's pane (it draws the same row) shows one of these panes.
-  on('ui.press', { plugin: 'owner-queue' }, async ($, e, next) => {
-    const tab = TABS.find(t => `tab-${t.name}` === e.element && t.pane !== 'owner-queue')
-    if (tab !== undefined) await show($, tab.pane)
-    return next(e)
-  })
-
-  on('ui.render', { component: 'Pane', requestId: AWS_PANE }, async ($, e) => {
-    const ui = $.ui.resolve(e)
-    const { Box, Text, Button } = ui
-    const login = await read($, aws)
-    const now = await $.clock.now()
-    const isClose = login.expiresAt === undefined || login.expiresAt - now < AWS_WARN
-    const command = `aws sso login --profile ${cfg.profile}`
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        {tabs($, ui, 'aws')}
-        <Box marginTop={1}>
-          <Text bold>{cfg.profile}</Text>
-          <Text color={isClose ? 'red' : 'green'}>
-            {'  '}
-            {login.expiresAt === undefined ? (login.error ?? 'not read yet') : left(login.expiresAt, now)}
-            {login.expiresAt !== undefined && login.expiresAt > now ? ' left' : ''}
-          </Text>
-        </Box>
-        {isClose && (
-          <Box marginTop={1}>
-            <Button
-              key="aws-login"
-              label="Queue login"
-              hotkey="l"
-              onPress={async () => {
-                try {
-                  await $.tool.call({ tool: QUEUE_TOOL, command, why: `AWS login for ${cfg.profile}` } as never)
-                  $.ui.toast('AWS login queued')
-                } catch {
-                  $.ui.toast('owner-queue is not loaded')
-                }
-              }}
-            />
-            <Text dimColor> {command}</Text>
-          </Box>
-        )}
-      </Box>
-    )
-  })
-
-  on('ui.render', { component: 'Pane', requestId: TODAY_PANE }, async ($, e) => {
-    const ui = $.ui.resolve(e)
-    const { Box, Text, Link } = ui
-    const list = await read($, todayList)
-    const waiting = (await read($, board)).pulls.filter(pull => !pull.isDraft && !pull.isReviewed)
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        {tabs($, ui, 'today')}
-        <Box marginTop={1}>
-          <Text bold>Merged today</Text>
-        </Box>
-        {list.merged.length === 0 && <Text dimColor>none yet</Text>}
-        {list.merged.map(pr => (
-          <Box key={`m-${pr.repo}#${pr.number}`} flexDirection="column">
-            <Text color="green" wrap="truncate-end">
-              {pr.repo.split('/')[1]}#{pr.number} {pr.sha} {pr.title}
-            </Text>
-            <Link href={pr.url} />
-          </Box>
-        ))}
-        <Box marginTop={1}>
-          <Text bold>Waiting for a first review</Text>
-        </Box>
-        {waiting.length === 0 && <Text dimColor>none</Text>}
-        {waiting.map(pull => (
-          <Text key={`w-${key(pull)}`} color="yellow" wrap="truncate-end">
-            {pull.repo.split('/')[1]}#{pull.number} {pull.sha.slice(0, 7)} {pull.title}
-          </Text>
-        ))}
-        {list.error !== undefined && (
-          <Text dimColor color="red" wrap="truncate-end">
-            {list.error}
-          </Text>
-        )}
-      </Box>
-    )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -314,6 +294,15 @@ export const register: Register = (on, options) => {
     const at = await $.clock.now()
     const open = now.pulls.filter(pull => !pull.isDraft)
     const drafts = now.pulls.filter(pull => pull.isDraft)
+    const shown = await read($, view)
+    if (shown !== 'status') {
+      return (
+        <Box flexDirection="column" paddingX={1}>
+          {tabs($, ui, shown)}
+          <Box marginTop={1}>{shown === 'aws' ? await awsView($, ui) : await todayView($, ui)}</Box>
+        </Box>
+      )
+    }
 
     return (
       <Box flexDirection="column" paddingX={1}>

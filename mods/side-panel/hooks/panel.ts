@@ -106,12 +106,11 @@ export function awsProfile(setting: string): string {
   return /^[\w.@+-]+$/.test(name) ? name : 'management'
 }
 
-// The tabs, in the order their keys (1-4) name them. The queue is owner-queue's pane.
-export const TABS = [
-  { name: 'status', key: '1', pane: 'side-panel' },
-  { name: 'queue', key: '2', pane: 'owner-queue' },
-  { name: 'aws', key: '3', pane: 'side-panel-aws' },
-  { name: 'today', key: '4', pane: 'side-panel-today' },
+// The pane's views, in the order their keys name them.
+export const VIEWS = [
+  { name: 'status', key: '1' },
+  { name: 'aws', key: '2' },
+  { name: 'today', key: '3' },
 ] as const
 
 // How long the merged-today list is kept before gh is asked again.

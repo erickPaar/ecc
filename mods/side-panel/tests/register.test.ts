@@ -336,30 +336,41 @@ describe('the pane', () => {
   })
 })
 
-const AWS = { component: 'Pane', requestId: 'side-panel-aws', surface: 'terminal', props: {} } as never
-const TODAY = { component: 'Pane', requestId: 'side-panel-today', surface: 'terminal', props: {} } as never
+// The pane after pressing a view's key: the same pane, drawn in place.
+async function view($: T, name: 'aws' | 'today'): Promise<string> {
+  await $.ui.render(PANE)
+  await $.ui.press({ plugin: 'side-panel', key: `view-${name}` })
+  return drawn($)
+}
 
-describe('tabs', () => {
-  test('the panes open as status, aws and today', { options: OPTIONS }, async ($, on) => {
+describe('views', () => {
+  test('one pane; keys 1-3 are drawn, spaced, with the Esc hint', { options: OPTIONS }, async ($, on) => {
     mock.clock(on)
     const w = world(on)
     await start($, 'coordinator')
     await $.command.run({ command: 'panel', args: '' } as never)
-    expect(w.opened.slice(-3)).toEqual(['side-panel', 'side-panel-aws', 'side-panel-today'])
+    expect(new Set(w.opened)).toEqual(new Set(['side-panel']))
+    const status = await drawn($)
+    expect(status).toContain('"key":"view-aws","label":"aws","hotkey":"2"')
+    expect(status).toContain('"key":"view-today","label":"today","hotkey":"3"')
+    expect(status).toContain('"marginRight":2')
+    expect(status).toContain('Esc: back to the prompt')
+    expect(status).not.toContain('"queue"')
   })
 
-  test('keys 1-4 are drawn on each pane; a key shows its pane with the keyboard', { options: OPTIONS }, async ($, on) => {
+  test('a view key changes what the same pane draws, with no other pane opened', { options: OPTIONS }, async ($, on) => {
     mock.clock(on)
     const w = world(on)
     await start($, 'coordinator')
-    const status = await drawn($)
-    for (const k of ['"queue"', '"aws"', '"today"', 'Esc']) expect(status).toContain(k)
-    expect(status).toContain('"hotkey":"3"')
-    await $.ui.press({ plugin: 'side-panel', key: 'tab-aws' })
-    expect(w.opened).toContain('side-panel-aws+focus')
-    await $.ui.render(AWS)
-    await $.ui.press({ plugin: 'side-panel', key: 'tab-today', requestId: 'side-panel-aws' })
-    expect(w.opened).toContain('side-panel-today+focus')
+    expect(await drawn($)).toContain('Pull requests')
+    const aws = await view($, 'aws')
+    expect(aws).not.toContain('Pull requests')
+    expect(aws).toContain('management')
+    expect(aws).toContain('"key":"view-status","label":"status","hotkey":"1"')
+    expect(await view($, 'today')).toContain('Merged today')
+    await $.ui.press({ plugin: 'side-panel', key: 'view-status' })
+    expect(await drawn($)).toContain('Pull requests')
+    expect(w.opened.every(id => id === 'side-panel')).toBe(true)
   })
 })
 
@@ -368,7 +379,7 @@ describe('the aws tab', () => {
     mock.clock(on, { now: Date.parse('2026-10-23T10:00:00Z') })
     world(on, { expiresAt: '2026-10-23T12:30:00Z' })
     await start($, 'coordinator')
-    const shown = JSON.stringify(await $.ui.render(AWS))
+    const shown = await view($, 'aws')
     expect(shown).toContain('2h 30m')
     expect(shown).toContain('green')
     expect(shown).not.toContain('Queue login')
@@ -378,7 +389,7 @@ describe('the aws tab', () => {
     mock.clock(on, { now: Date.parse('2026-10-23T10:00:00Z') })
     const w = world(on, { expiresAt: '2026-10-23T10:20:00Z' })
     await start($, 'coordinator')
-    const shown = JSON.stringify(await $.ui.render(AWS))
+    const shown = await view($, 'aws')
     expect(shown).toContain('20m')
     expect(shown).toContain('red')
     await $.ui.press({ plugin: 'side-panel', key: 'aws-login' })
@@ -389,7 +400,7 @@ describe('the aws tab', () => {
     mock.clock(on, { now: Date.parse('2026-10-23T10:00:00Z') })
     world(on)
     await start($, 'coordinator')
-    const shown = JSON.stringify(await $.ui.render(AWS))
+    const shown = await view($, 'aws')
     expect(shown).toContain('no login cached')
     expect(shown).toContain('Queue login')
   })
@@ -398,7 +409,7 @@ describe('the aws tab', () => {
     mock.clock(on)
     const w = world(on)
     await start($, 'coordinator')
-    const shown = JSON.stringify(await $.ui.render(AWS))
+    const shown = await view($, 'aws')
     expect(shown).not.toContain('curl')
     await $.ui.press({ plugin: 'side-panel', key: 'aws-login' })
     expect(w.called[0]).toMatchObject({ command: 'aws sso login --profile management' })
@@ -408,7 +419,7 @@ describe('the aws tab', () => {
     mock.clock(on)
     world(on)
     await start($, 'coordinator')
-    expect(JSON.stringify(await $.ui.render(AWS))).toContain('no sso_start_url for profile dev')
+    expect(await view($, 'aws')).toContain('no sso_start_url for profile dev')
   })
 })
 
@@ -419,7 +430,7 @@ describe('the today tab', () => {
     mock.clock(on, { now: NOW })
     world(on, { merged: MERGED })
     await start($, 'coordinator')
-    const shown = JSON.stringify(await $.ui.render(TODAY))
+    const shown = await view($, 'today')
     for (const k of ['"7"', 'abcdef1', 'feat: tabs', 'https://github.com/o/api/pull/7', '"12"', 'b5687a5']) expect(shown).toContain(k)
   })
 
