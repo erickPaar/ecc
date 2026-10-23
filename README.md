@@ -112,14 +112,14 @@ The account's permissions are the control; the guard doesn't replace them. ecc's
 
 ## side-panel (a mod)
 
-A third plugin, `side-panel@erick`: a pane beside the transcript, for the session you coordinate from, with three views: **status**, **aws** and **today**. owner-queue's **queue** is a pane of its own, beside it as another tab.
+A third plugin, `side-panel@erick`: panes beside the transcript, for the session you coordinate from, as three tabs: **status**, **aws** and **today** (owner-queue's **queue** is a tab of its own).
 
 - **status: open pull requests** of the repositories you name, each with its head's short SHA: ✔ when a reviewer's comment or review names that head and matches your review pattern, ● when nobody reviewed it yet, with a **Review** button. Review sends your review prompt to the session once it is idle, as if you typed it, and the head shows … until the comment arrives (or ten minutes pass, when Review shows again). Drafts come last.
 - **Sections** that your own command prints below them: other sessions, budgets, what waits on you. A line starting with `## ` is a heading; `●` is drawn red, `✓` green, `⠋` blue.
 - **aws:** time left on the AWS SSO login of `aws_profile` (default `management`), from its `sso_start_url` in `~/.aws/config` and the newest token for it in `~/.aws/sso/cache`; red from 30 minutes before it expires. Then **Queue login** (key `l`) puts `aws sso login --profile <profile>` in owner-queue.
 - **today:** pull requests merged today in `repos` (number, merge commit's short SHA, title, link; one `gh` call per repository, kept two minutes), and the open heads with no review yet.
-- **Keys**, once the pane has the keyboard (Ctrl+X Tab): `1` status, `2` aws, `3` today, each redrawn in the same pane, whose tab then reads that view's name; a dim line at the top shows the other views' keys. Esc gives the keyboard back to the prompt. The queue is reached by its own tab (a click, or Tab onto it and Enter); in it, `c` is Copy and `d` is Done on the first item you can act on.
-- It reads GitHub with `gh` (logged in) and runs your command every `every` seconds, only in the sessions whose name matches `sessions`. `/panel` opens the pane anywhere and starts the refresh there.
+- **Keys:** Ctrl+X Tab gives the panes the keyboard; Tab onto a tab and Enter, or a click, shows it; Esc goes back to the prompt. In the queue, `c` is Copy and `d` is Done on the first item you can act on.
+- It reads GitHub with `gh` (logged in) and runs your command every `every` seconds, only in the sessions whose name matches `sessions`. `/panel` opens the panes anywhere and starts the refresh there.
 
 ```
 /plugin install side-panel@erick

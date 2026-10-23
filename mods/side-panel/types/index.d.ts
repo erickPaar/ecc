@@ -20,9 +20,6 @@ export type Aws = { profile: string; expiresAt?: number; error?: string; checked
 
 export type Today = { merged: Merged[]; read: number; error?: string } // read: when gh was last asked
 
-// What the pane shows: status, aws or today.
-export type View = 'status' | 'aws' | 'today'
-
 export type Board = {
   pulls: Pull[]
   lines: Line[]
@@ -36,7 +33,6 @@ declare module 'claude-code' {
       asked: Asked[] // heads whose review was queued from the pane
       aws: Aws
       today: Today
-      view: View
       title: string // the session's title, when the engine passes one; kept across reloads
     }
   }

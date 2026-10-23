@@ -106,13 +106,6 @@ export function awsProfile(setting: string): string {
   return /^[\w.@+-]+$/.test(name) ? name : 'management'
 }
 
-// The pane's views, in the order their keys name them.
-export const VIEWS = [
-  { name: 'status', key: '1' },
-  { name: 'aws', key: '2' },
-  { name: 'today', key: '3' },
-] as const
-
 // How long the merged-today list is kept before gh is asked again.
 export const TODAY_FOR = 2 * 60_000
 // When the AWS login turns red.

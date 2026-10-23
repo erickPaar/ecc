@@ -338,59 +338,33 @@ describe('the pane', () => {
   })
 })
 
-// The pane after pressing a view's key: the same pane, drawn in place.
+// One of the side panel's panes as drawn.
 async function view($: T, name: 'aws' | 'today'): Promise<string> {
-  await $.ui.render(PANE)
-  await $.ui.press({ plugin: 'side-panel', key: `view-${name}` })
-  return drawn($)
+  return JSON.stringify(await $.ui.render({ component: 'Pane', requestId: `side-panel-${name}`, surface: 'terminal', props: {} } as never))
 }
 
-describe('views', () => {
-  test('one pane; keys 1-3 are drawn, spaced, with the Esc hint', { options: OPTIONS }, async ($, on) => {
+describe('panes', () => {
+  test('status, aws and today are three panes, each opened by a fixed id with a fixed title, never another', { options: OPTIONS }, async ($, on) => {
     mock.clock(on)
     const w = world(on)
     await start($, 'coordinator')
     await $.command.run({ command: 'panel', args: '' } as never)
-    expect(new Set(w.opened)).toEqual(new Set(['side-panel']))
-    const status = await drawn($)
-    expect(status).toContain('"key":"view-aws","label":"aws","hotkey":"2"')
-    expect(status).toContain('"key":"view-today","label":"today","hotkey":"3"')
-    expect(status).toContain('"marginRight":2')
-    expect(status).toContain('Esc: back to the prompt')
-    expect(status).not.toContain('"queue"')
+    await $.command.run({ command: 'panel', args: '' } as never)
+    const pairs = new Set(w.opened.map((id, i) => `${id}=${w.titles[i]}`))
+    expect(pairs).toEqual(new Set(['side-panel=status', 'side-panel-aws=aws', 'side-panel-today=today']))
+    expect(w.opened.slice(-3)).toEqual(['side-panel', 'side-panel-aws', 'side-panel-today'])
   })
 
-  test('a view key changes what the same pane draws, with no other pane opened', { options: OPTIONS }, async ($, on) => {
+  test('no number keys; each pane shows the engine\'s keys and Esc', { options: OPTIONS }, async ($, on) => {
     mock.clock(on)
-    const w = world(on)
+    world(on)
     await start($, 'coordinator')
-    expect(await drawn($)).toContain('Pull requests')
-    const aws = await view($, 'aws')
-    expect(aws).not.toContain('Pull requests')
-    expect(aws).toContain('management')
-    expect(aws).toContain('"key":"view-status","label":"status","hotkey":"1"')
-    expect(await view($, 'today')).toContain('Merged today')
-    await $.ui.press({ plugin: 'side-panel', key: 'view-status' })
-    expect(await drawn($)).toContain('Pull requests')
-    expect(w.opened.every(id => id === 'side-panel')).toBe(true)
-  })
-})
-
-describe('the pane title', () => {
-  test('follows the view: a key retitles the one pane, without asking for the keyboard', { options: OPTIONS }, async ($, on) => {
-    mock.clock(on)
-    const w = world(on)
-    await start($, 'coordinator')
-    await $.command.run({ command: 'panel', args: '' } as never)
-    expect(w.titles[w.titles.length - 1]).toBe('status')
-    await view($, 'aws')
-    expect(w.titles[w.titles.length - 1]).toBe('aws')
-    await view($, 'today')
-    expect(w.titles[w.titles.length - 1]).toBe('today')
-    expect(w.opened.every(id => id === 'side-panel')).toBe(true)
-    // /panel keeps the title of the view shown
-    await $.command.run({ command: 'panel', args: '' } as never)
-    expect(w.titles[w.titles.length - 1]).toBe('today')
+    for (const drawnPane of [await drawn($), await view($, 'aws'), await view($, 'today')]) {
+      expect(drawnPane).toContain('Esc: back to the prompt')
+      expect(drawnPane).not.toContain('"hotkey":"1"')
+      expect(drawnPane).not.toContain('"hotkey":"2"')
+      expect(drawnPane).not.toContain('"hotkey":"3"')
+    }
   })
 })
 

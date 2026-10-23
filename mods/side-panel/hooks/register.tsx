@@ -2,15 +2,16 @@
 // of your repositories (a Review button on each head nobody reviewed yet) and the sections your own
 // command prints; aws: time left on an AWS SSO login; today: what merged today and the heads waiting
 // for a first review. It reads; it sends only on a press: the review prompt, or the AWS login to the
-// owner's queue. Keys 1-4 switch the tabs while a pane has the keyboard (owner-queue's is 2).
+// owner's queue. Each is its own engine tab: Ctrl+X Tab, Tab and Enter or a click, Esc.
 import { atom, read, update } from 'claude-code'
 import type { Engine, Register } from 'claude-code'
 
-import type { Asked, Aws, Board, Pull, Today, View } from '../types'
-import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, VIEWS, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
+import type { Asked, Aws, Board, Pull, Today } from '../types'
+import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
 
 const PANE = 'side-panel'
-const view = atom({ plugin: 'side-panel', key: 'view' } as const, 'status' as View)
+const AWS_PANE = 'side-panel-aws'
+const TODAY_PANE = 'side-panel-today'
 const QUEUE_TOOL = 'mcp__owner-queue__ask_owner_to_run'
 const aws = atom({ plugin: 'side-panel', key: 'aws' } as const, { profile: '', checked: 0 } as Aws)
 const todayList = atom({ plugin: 'side-panel', key: 'today' } as const, { merged: [], read: 0 } as Today)
@@ -144,30 +145,19 @@ function tick($: Engine): void {
   $.clock.every(cfg.every * 1000, () => void readBoard($))
 }
 
-// One dim line at the top of the pane: the keys of the other views (1-3 while the pane has the
-// keyboard) and Esc. The engine's tab shows the current view: a key retitles the pane, which an
-// open of an open id does without opening another or asking for the keyboard.
-function tabs($: Engine, ui: ReturnType<Engine['ui']['resolve']>, current: View) {
-  const { Box, Text, Button } = ui
-  return (
-    <Box>
-      {VIEWS.filter(v => v.name !== current).map(v => (
-        <Box key={`view-${v.name}`} marginRight={2}>
-          <Button
-            key={`view-${v.name}`}
-            hotkey={v.key}
-            plain
-            label={v.name}
-            onPress={async () => {
-              await update($, view, () => v.name)
-              await $.ui.open({ id: PANE, title: v.name })
-            }}
-          />
-        </Box>
-      ))}
-      <Text dimColor>Esc: back to the prompt</Text>
-    </Box>
-  )
+// One dim line at the top of each pane: how to move between the tabs and back. The engine's own
+// keys, nothing of this plugin's.
+function hint(ui: ReturnType<Engine['ui']['resolve']>) {
+  const { Text } = ui
+  return <Text dimColor>Ctrl+X Tab · Tab and Enter, or a click, on a tab · Esc: back to the prompt</Text>
+}
+
+// Opens the three panes by fixed ids and fixed titles, status first, so the tabs read status, aws
+// and today; opening an open id again changes nothing, so a reload or /panel leaves no duplicate.
+async function openPanes($: Engine): Promise<void> {
+  await $.ui.open({ id: PANE, title: 'status' })
+  await $.ui.open({ id: AWS_PANE, title: 'aws' })
+  if (cfg.repos.length > 0) await $.ui.open({ id: TODAY_PANE, title: 'today' })
 }
 
 // The aws view: time left on the SSO login, and the login for the queue when it is close.
@@ -266,7 +256,7 @@ export const register: Register = (on, options) => {
     if (e.isInteractive && hasContent && (await isMine($))) {
       tick($)
       await readBoard($)
-      void read($, view).then(name => $.ui.open({ id: PANE, title: name })).catch(() => undefined)
+      void openPanes($).catch(() => undefined)
     }
     return next(e)
   })
@@ -283,9 +273,31 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'panel' }, async $ => {
     await readBoard($)
-    await $.ui.open({ id: PANE, title: await read($, view) })
+    await openPanes($)
     tick($)
     return { text: '' }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: AWS_PANE }, async ($, e) => {
+    const ui = $.ui.resolve(e)
+    const { Box } = ui
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        {hint(ui)}
+        {await awsView($, ui)}
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: TODAY_PANE }, async ($, e) => {
+    const ui = $.ui.resolve(e)
+    const { Box } = ui
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        {hint(ui)}
+        <Box marginTop={1}>{await todayView($, ui)}</Box>
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -296,19 +308,10 @@ export const register: Register = (on, options) => {
     const at = await $.clock.now()
     const open = now.pulls.filter(pull => !pull.isDraft)
     const drafts = now.pulls.filter(pull => pull.isDraft)
-    const shown = await read($, view)
-    if (shown !== 'status') {
-      return (
-        <Box flexDirection="column" paddingX={1}>
-          {tabs($, ui, shown)}
-          <Box marginTop={1}>{shown === 'aws' ? await awsView($, ui) : await todayView($, ui)}</Box>
-        </Box>
-      )
-    }
 
     return (
       <Box flexDirection="column" paddingX={1}>
-        {tabs($, ui, 'status')}
+        {hint(ui)}
         {cfg.repos.length > 0 && (
           <Box marginTop={1}>
             <Text bold>Pull requests</Text>
