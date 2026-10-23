@@ -20,6 +20,21 @@ export type Aws = { profile: string; expiresAt?: number; error?: string; checked
 
 export type Today = { merged: Merged[]; read: number; error?: string } // read: when gh was last asked
 
+// One subagent run, as a session wrote it to ~/.local/state/side-panel/runs/.
+export type Run = {
+  session: string // the name of the session that started it
+  id: string // the agent's id
+  label: string // its description, one line, cut short; never the prompt
+  type: string // the agent type
+  model?: string
+  effort?: string
+  isBackground: boolean
+  started: number
+  status: 'running' | 'done' | 'failed' | 'stopped'
+  finished?: number
+  beat?: number // when its session last marked it alive
+}
+
 export type Board = {
   pulls: Pull[]
   lines: Line[]
@@ -33,6 +48,7 @@ declare module 'claude-code' {
       asked: Asked[] // heads whose review was queued from the pane
       aws: Aws
       today: Today
+      runs: Run[] // every session's runs, as last read
       title: string // the session's title, when the engine passes one; kept across reloads
     }
   }

@@ -120,6 +120,11 @@ A third plugin, `side-panel@erick`: panes beside the transcript, for the session
 - **today:** pull requests merged today in `repos` (number, merge commit's short SHA, title, link; one `gh` call per repository, kept two minutes), and the open heads with no review yet.
 - **Keys:** Ctrl+X Tab gives the panes the keyboard; Tab onto a tab and Enter, or a click, shows it; Esc goes back to the prompt. In the queue, `c` is Copy and `d` is Done on the first item you can act on.
 - It reads GitHub with `gh` (logged in) and runs your command every `every` seconds, only in the sessions whose name matches `sessions`. `/panel` opens the panes anywhere and starts the refresh there.
+- **Running** (in status): every session's subagent runs, grouped by session: running ones first with their elapsed time, then those finished in the last hour, dimmed (✓ done, ✗ failed, ■ stopped). Each line is the run's description (one line, cut to 60 characters; never its prompt), agent type, model and effort.
+  - **Writer:** every session that loads the mod, whatever `sessions` says, writes one JSON file per run to `~/.local/state/side-panel/runs/` when a subagent starts (`agent.spawn`), and again when it ends (`SubagentStop`, or the agent list saying completed, failed or killed). It writes a temporary file and renames it, so a reader never sees half a file. Every 30 seconds it marks its running runs alive; a running run not marked for 3 minutes (its session crashed or closed) shows as `? stale`. A session that ends marks its running runs stopped.
+  - **Reader:** the status pane reads the folder each `every` seconds and deletes files finished, or last marked alive, a day ago.
+  - So the section covers the sessions that load this mod. Install it in user scope (`/plugin install side-panel@erick`) so every session does, and keep `sessions` naming the session that shows the pane.
+  - Background `Bash` runs are not listed: the engine does not give a mod their end.
 
 ```
 /plugin install side-panel@erick

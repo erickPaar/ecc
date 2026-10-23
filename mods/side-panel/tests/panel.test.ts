@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { elapsed, fileName, fromAgent, isOld, label, parse, sections } from '../hooks/runs'
+
 import { awsProfile, left, lines, logins, merged, names, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from '../hooks/panel'
 
 const SHA = 'b5687a5e1c0d2f3a4b5c6d7e8f9a0b1c2d3e4f5a'
@@ -148,5 +150,40 @@ describe('the today tab', () => {
   test('today is the local day', () => {
     const now = new Date(2026, 9, 23, 15, 30).getTime()
     expect(today(now)).toEqual({ since: new Date(2026, 9, 23).getTime(), day: '2026-10-23' })
+  })
+})
+
+describe('runs', () => {
+  const NOW = 10 * 86_400_000
+  const run = (extra: object) => ({ session: 's', id: 'a', label: 'l', type: 't', isBackground: true, started: NOW - 60_000, status: 'running' as const, beat: NOW, ...extra })
+  test('a label is one line, cut short', () => {
+    expect(label('a\n  b\tc')).toBe('a b c')
+    expect(label('x'.repeat(100))).toHaveLength(60)
+  })
+  test('a file name keeps only safe characters', () => {
+    expect(fileName('my session/../x', 'a:1')).toBe('my_session_.._x--a_1.json')
+  })
+  test('a file that is not a run is skipped', () => {
+    expect(parse('{')).toBeUndefined()
+    expect(parse('{}')).toBeUndefined()
+    expect(parse(JSON.stringify(run({})))).toMatchObject({ id: 'a' })
+  })
+  test('the agent list\'s ends', () => {
+    expect([fromAgent('completed'), fromAgent('failed'), fromAgent('killed'), fromAgent('running')]).toEqual(['done', 'failed', 'stopped', undefined])
+  })
+  test('stale after three minutes without a beat; finished shown an hour; deleted after a day', () => {
+    const [group] = sections([run({ id: 'r1', beat: NOW - 4 * 60_000 }), run({ id: 'r2' }), run({ id: 'd1', status: 'done', finished: NOW - 30 * 60_000 }), run({ id: 'd2', status: 'done', finished: NOW - 61 * 60_000 })], NOW)
+    expect(group!.runs.map(r => [r.id, r.isStale])).toEqual([['r1', true], ['r2', false], ['d1', false]])
+    expect(isOld(run({ status: 'done', finished: NOW - 86_400_001 }), NOW)).toBe(true)
+    expect(isOld(run({ beat: NOW - 1000 }), NOW)).toBe(false)
+    expect(isOld(run({ beat: NOW - 86_400_001 }), NOW)).toBe(true)
+  })
+  test('sessions in name order; running oldest first, then finished newest first', () => {
+    const got = sections([run({ session: 'b' }), run({ session: 'a', id: 'x', started: NOW - 1000 }), run({ session: 'a', id: 'y', started: NOW - 5000 }), run({ session: 'a', id: 'f1', status: 'done', finished: NOW - 9000 }), run({ session: 'a', id: 'f2', status: 'stopped', finished: NOW - 1000 })], NOW)
+    expect(got.map(g => g.session)).toEqual(['a', 'b'])
+    expect(got[0]!.runs.map(r => r.id)).toEqual(['y', 'x', 'f2', 'f1'])
+  })
+  test('elapsed', () => {
+    expect([elapsed(45_000), elapsed(12 * 60_000), elapsed(65 * 60_000)]).toEqual(['45s', '12m', '1h 05m'])
   })
 })
