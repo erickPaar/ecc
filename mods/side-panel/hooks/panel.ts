@@ -1,9 +1,9 @@
 // The pane's plain logic: reading `gh pr list` output, whether a head was reviewed, the review
 // prompt, and the sections command's lines. No engine calls here, so tests reach it whole.
 
-import type { Asked, Line, Pull } from '../types'
+import type { Asked, Line, Merged, Pull } from '../types'
 
-export type { Asked, Line, Pull }
+export type { Asked, Line, Merged, Pull }
 
 type GhNote = { body?: string; author?: { login?: string } }
 
@@ -97,4 +97,85 @@ export function logins(setting: string): string[] {
 export function seconds(setting: string): number {
   const n = Number.parseInt(setting, 10)
   return Number.isFinite(n) && n >= 15 ? n : 60
+}
+
+// The tabs, in the order their keys (1-4) name them. The queue is owner-queue's pane.
+export const TABS = [
+  { name: 'status', key: '1', pane: 'side-panel' },
+  { name: 'queue', key: '2', pane: 'owner-queue' },
+  { name: 'aws', key: '3', pane: 'side-panel-aws' },
+  { name: 'today', key: '4', pane: 'side-panel-today' },
+] as const
+
+// How long the merged-today list is kept before gh is asked again.
+export const TODAY_FOR = 2 * 60_000
+// When the AWS login turns red.
+export const AWS_WARN = 30 * 60_000
+
+// The SSO start URL of an AWS profile, from ~/.aws/config: its own sso_start_url, or that of the
+// [sso-session NAME] its sso_session names.
+export function ssoStartUrl(config: string, profile: string): string | undefined {
+  const sections = new Map<string, Map<string, string>>()
+  let current: Map<string, string> | undefined
+  for (const raw of config.split('\n')) {
+    const line = raw.replace(/[#;].*$/, '').trim()
+    const head = /^\[(.+)\]$/.exec(line)
+    if (head) {
+      current = new Map()
+      sections.set((head[1] ?? '').trim().replace(/\s+/g, ' '), current)
+    } else if (current && line.includes('=')) {
+      const at = line.indexOf('=')
+      current.set(line.slice(0, at).trim(), line.slice(at + 1).trim())
+    }
+  }
+  const own = sections.get(profile === 'default' ? 'default' : `profile ${profile}`)
+  if (own === undefined) return undefined
+  const session = own.get('sso_session')
+  return (session !== undefined ? sections.get(`sso-session ${session}`)?.get('sso_start_url') : undefined) ?? own.get('sso_start_url')
+}
+
+// The latest expiry (ms) among the cached SSO tokens for that start URL; files that are not
+// tokens are skipped.
+export function ssoExpiry(caches: readonly string[], startUrl: string): number | undefined {
+  let latest: number | undefined
+  for (const text of caches) {
+    try {
+      const token = JSON.parse(text) as { startUrl?: string; expiresAt?: string; accessToken?: string }
+      if (token.startUrl !== startUrl || token.accessToken === undefined) continue
+      const at = Date.parse(token.expiresAt ?? '')
+      if (Number.isFinite(at) && (latest === undefined || at > latest)) latest = at
+    } catch {
+      // not a token
+    }
+  }
+  return latest
+}
+
+// Time left as the pane shows it: 2h 05m, 12m, expired.
+export function left(expiresAt: number, now: number): string {
+  const ms = expiresAt - now
+  if (ms <= 0) return 'expired'
+  const minutes = Math.floor(ms / 60_000)
+  return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m` : `${minutes}m`
+}
+
+type GhMerged = { number: number; title: string; url: string; mergedAt?: string; mergeCommit?: { oid?: string } | null }
+
+// The JSON fields of the merged-today read.
+export const MERGED_FIELDS = 'number,title,url,mergedAt,mergeCommit'
+
+// One repository's pull requests merged since `since` (ms, the start of today), newest first.
+export function merged(repo: string, json: string, since: number): Merged[] {
+  return (JSON.parse(json) as GhMerged[])
+    .filter(pr => Date.parse(pr.mergedAt ?? '') >= since)
+    .map(pr => ({ repo, number: pr.number, title: pr.title, url: pr.url, sha: (pr.mergeCommit?.oid ?? '').slice(0, 7), at: Date.parse(pr.mergedAt ?? '') }))
+    .sort((a, b) => b.at - a.at)
+}
+
+// The start of the local day `now` falls in, and that day as gh's search reads it (YYYY-MM-DD).
+export function today(now: number): { since: number; day: string } {
+  const d = new Date(now)
+  const since = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return { since, day }
 }

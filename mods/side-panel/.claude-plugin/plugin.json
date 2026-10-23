@@ -1,7 +1,7 @@
 {
   "name": "side-panel",
   "version": "0.1.0",
-  "description": "A pane beside the transcript of the sessions you name: the open pull requests of your repositories, each new head with a Review button, and sections your own command prints (other sessions, CI minutes, what needs you).",
+  "description": "Panes beside the transcript of the sessions you name: status (open pull requests, each new head with a Review button, and sections your own command prints), aws (time left on an SSO login) and today (merged today, heads waiting for a first review); keys 1-4 switch tabs.",
   "types": "./types/index.d.ts",
   "userConfig": {
     "sessions": {
@@ -39,6 +39,12 @@
       "title": "Sections command",
       "description": "A command whose output the pane shows below the pull requests: a line starting with ## is a heading; a line starting with ● is shown red, ✓ green, ⠋ blue. Empty shows none.",
       "default": ""
+    },
+    "aws_profile": {
+      "type": "string",
+      "title": "AWS profile",
+      "description": "The AWS SSO profile whose login the aws tab watches: time left, red 30 minutes before it expires, and a button that queues aws sso login for it in owner-queue. Empty is management.",
+      "default": "management"
     },
     "every": {
       "type": "string",

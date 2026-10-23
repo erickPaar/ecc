@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { lines, logins, names, prompt, pulls, repos, seconds, state } from '../hooks/panel'
+import { left, lines, logins, merged, names, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from '../hooks/panel'
 
 const SHA = 'b5687a5e1c0d2f3a4b5c6d7e8f9a0b1c2d3e4f5a'
 
@@ -100,5 +100,48 @@ describe('settings', () => {
     expect(seconds('14')).toBe(60)
     expect(seconds('5')).toBe(60)
     expect(seconds('x')).toBe(60)
+  })
+})
+
+describe('the aws tab', () => {
+  const CONFIG = '[default]\nregion = us-east-1\n\n[profile management]\nsso_session = paarpet\nregion = us-east-1\n\n[sso-session paarpet]\nsso_start_url = https://paar.awsapps.com/start\n\n[profile old]\nsso_start_url = https://old.awsapps.com/start # legacy\n'
+  test('reads the start URL through the sso_session, or the profile\'s own', () => {
+    expect(ssoStartUrl(CONFIG, 'management')).toBe('https://paar.awsapps.com/start')
+    expect(ssoStartUrl(CONFIG, 'old')).toBe('https://old.awsapps.com/start')
+    expect(ssoStartUrl(CONFIG, 'missing')).toBeUndefined()
+  })
+  test('the latest token for that URL counts; others and non-tokens do not', () => {
+    const token = (url: string, at: string) => JSON.stringify({ startUrl: url, expiresAt: at, accessToken: 'x' })
+    const caches = [
+      token('https://paar.awsapps.com/start', '2026-10-23T10:00:00Z'),
+      token('https://paar.awsapps.com/start', '2026-10-23T18:00:00Z'),
+      token('https://other.awsapps.com/start', '2026-10-24T00:00:00Z'),
+      JSON.stringify({ startUrl: 'https://paar.awsapps.com/start', clientId: 'c', expiresAt: '2027-01-01T00:00:00Z' }),
+      'not json',
+    ]
+    expect(ssoExpiry(caches, 'https://paar.awsapps.com/start')).toBe(Date.parse('2026-10-23T18:00:00Z'))
+    expect(ssoExpiry(caches, 'https://none/start')).toBeUndefined()
+  })
+  test('time left reads in hours and minutes', () => {
+    expect(left(125 * 60_000, 0)).toBe('2h 05m')
+    expect(left(12 * 60_000 + 5000, 0)).toBe('12m')
+    expect(left(0, 1)).toBe('expired')
+  })
+})
+
+describe('the today tab', () => {
+  test('keeps what merged since the start of today, newest first, with the short merge commit', () => {
+    const json = JSON.stringify([
+      { number: 1, title: 'old', url: 'u1', mergedAt: '2026-10-22T23:00:00Z', mergeCommit: { oid: 'aaaaaaaaaa' } },
+      { number: 2, title: 'a', url: 'u2', mergedAt: '2026-10-23T09:00:00Z', mergeCommit: { oid: 'bbbbbbbbbb' } },
+      { number: 3, title: 'b', url: 'u3', mergedAt: '2026-10-23T11:00:00Z', mergeCommit: null },
+    ])
+    const got = merged('o/api', json, Date.parse('2026-10-23T00:00:00Z'))
+    expect(got.map(m => m.number)).toEqual([3, 2])
+    expect(got[1]).toMatchObject({ repo: 'o/api', sha: 'bbbbbbb', url: 'u2', title: 'a' })
+  })
+  test('today is the local day', () => {
+    const now = new Date(2026, 9, 23, 15, 30).getTime()
+    expect(today(now)).toEqual({ since: new Date(2026, 9, 23).getTime(), day: '2026-10-23' })
   })
 })

@@ -465,6 +465,35 @@ describe('the tick', () => {
 })
 
 describe('the pane', () => {
+  test('keys: the tab row (1, 3, 4 for side-panel), and c / d on the first item that can be acted on', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    await ask($, 'make apply STACK=storage')
+    const [first, second] = queued(w)
+    const tree = JSON.parse(await pane($)) as unknown
+    const buttons: { key?: string; hotkey?: string }[] = []
+    const walk = (n: unknown): void => {
+      if (n === null || typeof n !== 'object') return
+      const node = n as { type?: string; props?: { key?: string; hotkey?: string }; children?: unknown[] }
+      if (node.type === 'Button') buttons.push(node.props ?? {})
+      for (const c of node.children ?? []) walk(c)
+    }
+    walk(tree)
+    const hotkey = (key: string) => buttons.find(b => b.key === key)?.hotkey
+    expect([hotkey('tab-status'), hotkey('tab-aws'), hotkey('tab-today')]).toEqual(['1', '3', '4'])
+    expect(hotkey(`copy-${first!.id}`)).toBe('c')
+    expect(hotkey(`done-${first!.id}`)).toBe('d')
+    expect(hotkey(`copy-${second!.id}`)).toBeUndefined()
+    expect(hotkey(`done-${second!.id}`)).toBeUndefined()
+    expect(await pane($)).toContain('Esc: back to the prompt')
+    // Done on the first moves the keys to the next
+    await $.ui.press({ plugin: 'owner-queue', key: `done-${first!.id}` })
+    walk((buttons.length = 0, JSON.parse(await pane($))))
+    expect(hotkey(`copy-${second!.id}`)).toBe('c')
+  })
+
   test('Copy puts the command with its marker on the clipboard', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: 5000 })
     const w = world(on)

@@ -133,6 +133,35 @@ async function pushRemote($: Engine, path: string, branch: string): Promise<stri
   return 'origin'
 }
 
+// The tabs side-panel draws too, in the order their keys name them; this pane is the queue. A key
+// for another tab is pressed here and side-panel, hooked on the press, shows its pane.
+const TABS = [
+  ['1', 'status'],
+  ['2', 'queue'],
+  ['3', 'aws'],
+  ['4', 'today'],
+] as const
+
+function tabs(ui: ReturnType<Engine['ui']['resolve']>) {
+  const { Box, Text, Button } = ui
+  return (
+    <Box flexDirection="column">
+      <Box>
+        {TABS.map(([hotkey, name]) =>
+          name === 'queue' ? (
+            <Text key={`tab-${name}`} bold>
+              {hotkey}: {name}{'  '}
+            </Text>
+          ) : (
+            <Button key={`tab-${name}`} hotkey={hotkey} plain label={name} onPress={() => undefined} />
+          ),
+        )}
+      </Box>
+      <Text dimColor>c: Copy · d: Done (first waiting) · Esc: back to the prompt</Text>
+    </Box>
+  )
+}
+
 export const register: Register = (on, options) => {
   ctx.paneMode = (options.pane as string) ?? 'auto'
   const extra = (options.held as string) ?? ''
@@ -231,15 +260,26 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // The queue's key pressed in a side-panel pane shows this one.
+  on('ui.press', { plugin: 'side-panel', element: 'tab-queue' }, async ($, e, next) => {
+    const placed = await $.ui.open({ id: PANE, title: 'queue', focus: true })
+    await update($, isPaneShown, () => placed.isPlaced)
+    return next(e)
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Button } = ui
     const all = await read($, items)
     const shown = visible(all, await $.clock.now())
     const open = shown.filter(one => one.status !== 'done')
     const number = (item: Item) => open.indexOf(item) + 1
+    // c and d press Copy and Done on the first item that can be acted on.
+    const keyed = shown.find(item => item.status !== 'done' && blocker(item, all) === undefined)
 
     return (
       <Box flexDirection="column" paddingX={1}>
+        {tabs(ui)}
         <Text bold color={open.length > 0 ? 'red' : 'green'}>
           {open.length > 0 ? TEXT.title(open.length) : TEXT.empty}
         </Text>
@@ -268,6 +308,7 @@ export const register: Register = (on, options) => {
                     <Button
                       key={`copy-${item.id}`}
                       label={TEXT.copy}
+                      {...(item === keyed ? { hotkey: 'c' } : {})}
                       onPress={async () => {
                         // Read again: another session may have finished it since the pane was drawn.
                         const now = (await load($, ctx.dir)).find(one => one.id === item.id)
@@ -283,7 +324,7 @@ export const register: Register = (on, options) => {
                       }}
                     />
                   )}
-                  <Button key={`done-${item.id}`} label={TEXT.done} onPress={() => setStatus($, item, 'done')} />
+                  <Button key={`done-${item.id}`} label={TEXT.done} {...(item === keyed ? { hotkey: 'd' } : {})} onPress={() => setStatus($, item, 'done')} />
                   <Button key={`remove-${item.id}`} label={TEXT.remove} onPress={() => setStatus($, item, 'removed')} />
                 </Box>
               )}
