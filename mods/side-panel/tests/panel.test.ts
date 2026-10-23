@@ -178,6 +178,10 @@ describe('runs', () => {
     expect(isOld(run({ beat: NOW - 1000 }), NOW)).toBe(false)
     expect(isOld(run({ beat: NOW - 86_400_001 }), NOW)).toBe(true)
   })
+  test('a stale run stops showing after six hours', () => {
+    expect(sections([run({ beat: NOW - 5 * 3600_000 })], NOW)).toHaveLength(1)
+    expect(sections([run({ beat: NOW - 7 * 3600_000 })], NOW)).toHaveLength(0)
+  })
   test('sessions in name order; running oldest first, then finished newest first', () => {
     const got = sections([run({ session: 'b' }), run({ session: 'a', id: 'x', started: NOW - 1000 }), run({ session: 'a', id: 'y', started: NOW - 5000 }), run({ session: 'a', id: 'f1', status: 'done', finished: NOW - 9000 }), run({ session: 'a', id: 'f2', status: 'stopped', finished: NOW - 1000 })], NOW)
     expect(got.map(g => g.session)).toEqual(['a', 'b'])

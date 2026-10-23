@@ -19,6 +19,7 @@ type World = {
   merged?: object[] // what gh answers for merged pull requests
   runs?: Record<string, object> // run files in ~/.local/state/side-panel/runs, by name
   agents?: { id: string; status: string }[] // what $.agent.list answers
+  cwdFails?: boolean // $.session.cwd rejects
 }
 
 // What a session answers beneath the plugin: gh, the sections command, the environment and the
@@ -36,8 +37,15 @@ function world(on: On, w: World = {}) {
     return { value: undefined } as never
   })
   on('fs.exists', (_$, e) => ({ value: e.path.endsWith('/runs') && w.runs !== undefined }) as never)
-  on('agent.list', () => ({ value: w.agents ?? [] }) as never)
-  on('session.cwd', () => ({ value: '/home/x/projects/my-api' }) as never)
+  let lists = 0
+  on('agent.list', () => {
+    lists += 1
+    return { value: w.agents ?? [] } as never
+  })
+  on('session.cwd', () => {
+    if (w.cwdFails) throw new Error('no cwd')
+    return { value: '/home/x/projects/my-api' } as never
+  })
   on('fs.read', (_$, e) => {
     const name = e.path.split('/').pop() ?? ''
     if (e.path.includes('/runs/') && w.runs?.[name] !== undefined) return { value: JSON.stringify(w.runs[name]) } as never
@@ -88,7 +96,7 @@ function world(on: On, w: World = {}) {
     submitted.push(e.text)
     return { text: e.text } as never
   })
-  return { ran, opened, submitted, order, called, titles, written }
+  return { ran, opened, submitted, order, called, titles, written, lists: () => lists }
 }
 
 type T = Parameters<Parameters<typeof test>[2] & Function>[0]
@@ -492,6 +500,29 @@ describe('running', () => {
     setup.agents = [{ id: 'a1', status: 'failed' }]
     await clock.advance(30_000)
     expect(lastRun(w)).toMatchObject({ status: 'failed', finished: NOW + 60_000 })
+  })
+
+  test('a run the agent list no longer has is settled as stopped, and the beat stops when nothing runs', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }) as never)
+    const w = world(on, { czw: 'orchestrator', agents: [] })
+    await start($, '')
+    await spawn($, 'a1')
+    await clock.advance(30_000)
+    expect(lastRun(w)).toMatchObject({ status: 'stopped', finished: NOW + 30_000 })
+    const asked = w.lists()
+    await clock.advance(5 * 60_000)
+    expect(w.ran.filter(argv => argv[0] === 'mv').length).toBe(2)
+    expect(w.lists()).toBe(asked)
+  })
+
+  test('a spawn whose run cannot be written still answers the spawn', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }) as never)
+    const w = world(on, { cwdFails: true })
+    await start($, '')
+    expect(await spawn($, 'a1')).toMatchObject({ agentId: 'a1' })
+    expect(w.written.size).toBe(0)
   })
 
   test('the panel shows the runs by session: running with elapsed time, stale, finished dimmed; old files deleted', { options: OPTIONS }, async ($, on) => {

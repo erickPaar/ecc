@@ -9,6 +9,8 @@ export type { Run }
 // shows as stale rather than running.
 export const BEAT_EVERY = 30_000
 export const STALE_AFTER = 3 * 60_000
+// When a stale run stops showing (its file is still deleted only after a day).
+export const STALE_SHOWN_FOR = 6 * 60 * 60_000
 // How long a finished run shows, and when its file is deleted.
 export const SHOWN_FOR = 60 * 60_000
 export const KEPT_FOR = 24 * 60 * 60_000
@@ -58,7 +60,9 @@ export type Shown = Run & { isStale: boolean }
 export function sections(runs: readonly Run[], now: number): { session: string; runs: Shown[] }[] {
   const by = new Map<string, Shown[]>()
   for (const run of runs) {
-    const isStale = run.status === 'running' && now - (run.beat ?? run.started) > STALE_AFTER
+    const silent = now - (run.beat ?? run.started)
+    const isStale = run.status === 'running' && silent > STALE_AFTER
+    if (isStale && silent > STALE_SHOWN_FOR) continue
     if (run.status !== 'running' && now - (run.finished ?? run.started) > SHOWN_FOR) continue
     by.set(run.session, [...(by.get(run.session) ?? []), { ...run, isStale }])
   }

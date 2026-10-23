@@ -27,7 +27,7 @@ let me: string | undefined
 let isTicking = false
 const runsAtom = atom({ plugin: 'side-panel', key: 'runs' } as const, [] as Run[])
 // The writer: this session's own runs, and the effort each Agent call asked for, by tool_use_id.
-const mine = { dir: '', session: '', runs: new Map<string, Run>(), efforts: new Map<string, string>(), isBeating: false }
+const mine = { dir: '', session: '', runs: new Map<string, Run>(), efforts: new Map<string, string>(), beat: undefined as { cancel: () => void } | undefined }
 
 async function runsDir($: Engine): Promise<string> {
   return `${(await $.env.get('HOME')) ?? '/tmp'}/.local/state/side-panel/runs`
@@ -35,7 +35,9 @@ async function runsDir($: Engine): Promise<string> {
 
 // Writes one run's file whole: a temporary file, then a rename, so a reader never sees half of it.
 async function writeRun($: Engine, run: Run): Promise<void> {
-  mine.runs.set(run.id, run)
+  // Only running runs are kept here: a settled one is never written again.
+  if (run.status === 'running') mine.runs.set(run.id, run)
+  else mine.runs.delete(run.id)
   const path = `${mine.dir}/${fileName(run.session, run.id)}`
   try {
     await $.fs.write(`${path}.tmp`, JSON.stringify(run))
@@ -46,18 +48,32 @@ async function writeRun($: Engine, run: Run): Promise<void> {
 }
 
 // Marks this session's running runs alive, and settles the ones the agent list says ended.
+// The agent list drops an agent some time after it ends, so a run missing from it (once it had a
+// beat to show up) has ended without its SubagentStop: stopped, its outcome unknown. The timer stops
+// when nothing runs.
 async function beat($: Engine): Promise<void> {
-  const now = await $.clock.now()
-  let listed: Awaited<ReturnType<Engine['agent']['list']>> = []
   try {
-    listed = await $.agent.list()
+    const now = await $.clock.now()
+    let listed: Awaited<ReturnType<Engine['agent']['list']>> | undefined
+    try {
+      listed = await $.agent.list()
+    } catch {
+      listed = undefined // cannot tell: only beat
+    }
+    for (const run of [...mine.runs.values()]) {
+      const agent = listed?.find(a => a.id === run.id)
+      const ended = agent !== undefined ? fromAgent(agent.status) : listed !== undefined && now - run.started >= BEAT_EVERY ? 'stopped' : undefined
+      await writeRun($, ended !== undefined ? { ...run, status: ended, finished: now } : { ...run, beat: now })
+    }
   } catch {
-    // keep beating
+    // the next beat tries again
   }
-  for (const run of [...mine.runs.values()].filter(r => r.status === 'running')) {
-    const status = fromAgent(listed.find(a => a.id === run.id)?.status ?? '')
-    await writeRun($, status !== undefined ? { ...run, status, finished: now } : { ...run, beat: now })
-  }
+  if (mine.runs.size === 0) stopBeat()
+}
+
+function stopBeat(): void {
+  mine.beat?.cancel()
+  mine.beat = undefined
 }
 
 async function finish($: Engine, id: string, status: Run['status']): Promise<void> {
@@ -312,7 +328,7 @@ export const register: Register = (on, options) => {
   cfg.profile = awsProfile((options.aws_profile as string) ?? '')
   me = undefined
   isTicking = false
-  mine.isBeating = false
+  stopBeat() // a reload must not double the beats
   const hasContent = cfg.repos.length > 0 || cfg.sections !== ''
 
   // The writer, in every session that loads the mod: one file per subagent run.
@@ -324,28 +340,31 @@ export const register: Register = (on, options) => {
 
   on('agent.spawn', async ($, e, next) => {
     const started = await next(e)
-    if (started.agentId === undefined) return started
-    if (mine.dir === '') mine.dir = await runsDir($)
-    if (mine.session === '') mine.session = (await read($, title)) || (await $.env.get('CZW_SESSION')) || (await $.session.cwd()).split('/').pop() || 'session'
-    const now = await $.clock.now()
-    const effort = mine.efforts.get(e.tool_use_id)
-    mine.efforts.delete(e.tool_use_id)
-    await run($, ['mkdir', '-p', mine.dir])
-    await writeRun($, {
-      session: mine.session,
-      id: started.agentId,
-      label: label(e.description),
-      type: e.subagentType || 'general-purpose',
-      ...(started.model ? { model: started.model } : {}),
-      ...(effort ? { effort } : {}),
-      isBackground: e.background,
-      started: now,
-      beat: now,
-      status: 'running',
-    })
-    if (!mine.isBeating) {
-      mine.isBeating = true
-      $.clock.every(BEAT_EVERY, () => void beat($))
+    const id = started.agentId
+    if (id === undefined) return started
+    // The spawn's answer stands whatever happens to its file.
+    try {
+      if (mine.dir === '') mine.dir = await runsDir($)
+      if (mine.session === '') mine.session = (await read($, title)) || (await $.env.get('CZW_SESSION')) || (await $.session.cwd()).split('/').pop() || 'session'
+      const now = await $.clock.now()
+      const effort = mine.efforts.get(e.tool_use_id)
+      mine.efforts.delete(e.tool_use_id)
+      await run($, ['mkdir', '-p', mine.dir])
+      await writeRun($, {
+        session: mine.session,
+        id,
+        label: label(e.description),
+        type: e.subagentType || 'general-purpose',
+        ...(started.model ? { model: started.model } : {}),
+        ...(effort ? { effort } : {}),
+        isBackground: e.background,
+        started: now,
+        beat: now,
+        status: 'running',
+      })
+      if (mine.beat === undefined) mine.beat = $.clock.every(BEAT_EVERY, () => void beat($))
+    } catch {
+      // The panel misses this run.
     }
     return started
   })
