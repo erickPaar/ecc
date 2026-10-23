@@ -99,6 +99,13 @@ export function seconds(setting: string): number {
   return Number.isFinite(n) && n >= 15 ? n : 60
 }
 
+// The AWS profile setting: a plain profile name, else management. It is put in a command the
+// owner runs, so nothing else gets through.
+export function awsProfile(setting: string): string {
+  const name = setting.trim()
+  return /^[\w.@+-]+$/.test(name) ? name : 'management'
+}
+
 // The tabs, in the order their keys (1-4) name them. The queue is owner-queue's pane.
 export const TABS = [
   { name: 'status', key: '1', pane: 'side-panel' },

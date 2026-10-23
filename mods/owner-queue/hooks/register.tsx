@@ -274,8 +274,10 @@ export const register: Register = (on, options) => {
     const shown = visible(all, await $.clock.now())
     const open = shown.filter(one => one.status !== 'done')
     const number = (item: Item) => open.indexOf(item) + 1
-    // c and d press Copy and Done on the first item that can be acted on.
+    // d presses Done on the first item that can be acted on; c presses Copy on the first of those
+    // with a command.
     const keyed = shown.find(item => item.status !== 'done' && blocker(item, all) === undefined)
+    const keyedCopy = shown.find(item => item.status !== 'done' && item.command !== '' && blocker(item, all) === undefined)
 
     return (
       <Box flexDirection="column" paddingX={1}>
@@ -308,7 +310,7 @@ export const register: Register = (on, options) => {
                     <Button
                       key={`copy-${item.id}`}
                       label={TEXT.copy}
-                      {...(item === keyed ? { hotkey: 'c' } : {})}
+                      {...(item === keyedCopy ? { hotkey: 'c' } : {})}
                       onPress={async () => {
                         // Read again: another session may have finished it since the pane was drawn.
                         const now = (await load($, ctx.dir)).find(one => one.id === item.id)
@@ -324,7 +326,14 @@ export const register: Register = (on, options) => {
                       }}
                     />
                   )}
-                  <Button key={`done-${item.id}`} label={TEXT.done} {...(item === keyed ? { hotkey: 'd' } : {})} onPress={() => setStatus($, item, 'done')} />
+                  <Button key={`done-${item.id}`} label={TEXT.done} {...(item === keyed ? { hotkey: 'd' } : {})}
+                    onPress={async () => {
+                      // Read again, as Copy does: another session may have finished or removed it.
+                      const now = (await load($, ctx.dir)).find(one => one.id === item.id)
+                      if (now !== undefined && (now.status === 'waiting' || now.status === 'failed')) await setStatus($, now, 'done')
+                      else await refresh($)
+                    }}
+                  />
                   <Button key={`remove-${item.id}`} label={TEXT.remove} onPress={() => setStatus($, item, 'removed')} />
                 </Box>
               )}

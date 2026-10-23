@@ -7,7 +7,7 @@ import { atom, read, update } from 'claude-code'
 import type { Engine, Register } from 'claude-code'
 
 import type { Asked, Aws, Board, Pull, Today } from '../types'
-import { AWS_WARN, GH_FIELDS, MERGED_FIELDS, TABS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
+import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TABS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
 
 const PANE = 'side-panel'
 const AWS_PANE = 'side-panel-aws'
@@ -187,7 +187,7 @@ export const register: Register = (on, options) => {
   cfg.template = (options.review_prompt as string) ?? ''
   cfg.sections = (options.sections as string) ?? ''
   cfg.every = seconds((options.every as string) ?? '60')
-  cfg.profile = ((options.aws_profile as string) ?? '').trim() || 'management'
+  cfg.profile = awsProfile((options.aws_profile as string) ?? '')
   me = undefined
   isTicking = false
   const hasContent = cfg.repos.length > 0 || cfg.sections !== ''
@@ -234,12 +234,12 @@ export const register: Register = (on, options) => {
     const login = await read($, aws)
     const now = await $.clock.now()
     const isClose = login.expiresAt === undefined || login.expiresAt - now < AWS_WARN
-    const command = `aws sso login --profile ${login.profile || cfg.profile}`
+    const command = `aws sso login --profile ${cfg.profile}`
     return (
       <Box flexDirection="column" paddingX={1}>
         {tabs($, ui, 'aws')}
         <Box marginTop={1}>
-          <Text bold>{login.profile || cfg.profile}</Text>
+          <Text bold>{cfg.profile}</Text>
           <Text color={isClose ? 'red' : 'green'}>
             {'  '}
             {login.expiresAt === undefined ? (login.error ?? 'not read yet') : left(login.expiresAt, now)}
@@ -254,7 +254,7 @@ export const register: Register = (on, options) => {
               hotkey="l"
               onPress={async () => {
                 try {
-                  await $.tool.call({ tool: QUEUE_TOOL, command, why: `AWS login for ${login.profile || cfg.profile}` } as never)
+                  await $.tool.call({ tool: QUEUE_TOOL, command, why: `AWS login for ${cfg.profile}` } as never)
                   $.ui.toast('AWS login queued')
                 } catch {
                   $.ui.toast('owner-queue is not loaded')

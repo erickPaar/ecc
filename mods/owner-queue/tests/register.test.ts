@@ -520,6 +520,31 @@ describe('the pane', () => {
     expect(w.copied).toEqual([])
   })
 
+  test('c goes to the first item with a command; d to the first item', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, '')
+    await ask($, 'make apply STACK=network')
+    const [decision, command] = queued(w)
+    const drawn = await pane($)
+    expect(drawn).toContain(`"key":"done-${decision!.id}","label":"Done","hotkey":"d"`)
+    expect(drawn).toContain(`"key":"copy-${command!.id}","label":"Copy","hotkey":"c"`)
+    expect(drawn).not.toContain(`"key":"done-${command!.id}","label":"Done","hotkey":"d"`)
+  })
+
+  test('Done on an item removed elsewhere since the pane was drawn leaves it removed', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'make apply STACK=network')
+    const item = nth(w)
+    await pane($)
+    w.files.set(`${DIR}/${item.id}.json`, JSON.stringify({ ...item, status: 'removed', updated: 5000 }))
+    await $.ui.press({ plugin: 'owner-queue', key: `done-${item.id}` })
+    expect(nth(w)).toMatchObject({ status: 'removed' })
+  })
+
   test('a decision with no command has Done and Remove, and no Copy', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: 5000 })
     const w = world(on)
