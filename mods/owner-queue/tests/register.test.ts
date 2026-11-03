@@ -311,7 +311,102 @@ describe('the queue', () => {
   })
 })
 
+describe('what it refuses', () => {
+  test('a command that only reads is not queued, and the caller is told to run it itself', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const answer = await ask($, 'gh issue view 157 --comments')
+    expect(queued(w)).toHaveLength(0)
+    expect(String(answer.result)).toContain('run it yourself')
+  })
+
+  test('a decision, a write and a command the guard holds are queued', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, '')
+    await ask($, 'gh pr ready 12')
+    await ask($, 'aws iam delete-role --role-name x')
+    expect(queued(w).map(one => one.command)).toEqual(['', 'gh pr ready 12', 'aws iam delete-role --role-name x'])
+  })
+
+  test('a read the person\'s own expression holds is queued', { options: { ...OPTIONS, held: 'gh\\s+pr\\s+list' } }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await ask($, 'gh pr list')
+    expect(queued(w)).toHaveLength(1)
+  })
+})
+
 describe('who asked', () => {
+  test('an item asked from a subagent names it after the session, by its description', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'api-design' } })
+    on('agent.list', () => ({ value: [{ id: 'a1', description: 'P2 reviewer', type: 'independent-reviewer', status: 'running' }] }) as never)
+    await start($)
+    await $.tool.call({ tool: 'mcp__owner-queue__ask_owner_to_run', command: 'tofu apply', why: 'apply', agentId: 'a1' } as never)
+    expect(nth(w)).toMatchObject({ from: 'api-design', agent: 'P2 reviewer' })
+    expect(await pane($)).toContain('"api-design"," › P2 reviewer"')
+  })
+
+  test('a command the guard holds in a subagent names it too', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'api-design' } })
+    on('agent.list', () => ({ value: [{ id: 'a1', description: '', type: 'Explore', status: 'running' }] }) as never)
+    await start($)
+    await $.tool.call({ tool: 'Bash', command: 'tofu apply', agentId: 'a1' } as never)
+    expect(nth(w)).toMatchObject({ from: 'api-design', agent: 'Explore' })
+  })
+
+  test('a subagent the agent list does not name is shown by its id', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'api-design' } })
+    on('agent.list', () => ({ value: [] }) as never)
+    await start($)
+    await $.tool.call({ tool: 'mcp__owner-queue__ask_owner_to_run', command: 'tofu apply', why: 'apply', agentId: 'a1b2c3d4e5f6' } as never)
+    expect(nth(w).agent).toBe('agent a1b2c3d4')
+  })
+
+  test('only the first line of a description names it', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'api-design' } })
+    on('agent.list', () => ({ value: [{ id: 'a1', description: 'P2 reviewer\nsecond line', type: 'independent-reviewer', status: 'running' }] }) as never)
+    await start($)
+    await $.tool.call({ tool: 'mcp__owner-queue__ask_owner_to_run', command: 'tofu apply', why: 'apply', agentId: 'a1' } as never)
+    expect(nth(w).agent).toBe('P2 reviewer')
+  })
+
+  test('an entry with no description is named by its type', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'api-design' } })
+    on('agent.list', () => ({ value: [{ id: 'a1', type: 'Explore', status: 'running' }] }) as never)
+    await start($)
+    await $.tool.call({ tool: 'mcp__owner-queue__ask_owner_to_run', command: 'tofu apply', why: 'apply', agentId: 'a1' } as never)
+    expect(nth(w).agent).toBe('Explore')
+  })
+
+  test('an agent list that fails names the subagent by its id, and the item is still queued', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'api-design' } })
+    on('agent.list', () => {
+      throw new Error('no list')
+    })
+    await start($)
+    await $.tool.call({ tool: 'mcp__owner-queue__ask_owner_to_run', command: 'tofu apply', why: 'apply', agentId: 'a1b2c3d4e5f6' } as never)
+    expect(nth(w)).toMatchObject({ from: 'api-design', agent: 'agent a1b2c3d4' })
+  })
+
+  test('the main loop names the session only', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on, { env: { CZW_SESSION: 'api-design' } })
+    await start($)
+    await ask($, 'tofu apply')
+    expect(nth(w).agent).toBeUndefined()
+    expect(await pane($)).not.toContain('›')
+  })
+
   test('an item names the session by its title when the engine passes it', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: 5000 })
     const w = world(on, { env: { CZW_SESSION: 'workspace-pane' } })

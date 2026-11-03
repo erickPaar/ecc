@@ -1,6 +1,7 @@
 // Which commands only the owner runs. Each simple command the shell would run (shell.ts) is judged
 // by its program and arguments, so spelling (quotes, continuations, paths, wrappers) does not
-// matter. AWS is an allow-list of reads; everything else is a list of writes.
+// matter. AWS is an allow-list of reads; everything else is a list of writes. The same reading
+// tells the few commands that surely only read (onlyReads), which ask_owner_to_run does not queue.
 //
 // A best effort, not an integrity boundary: it catches the ways a model writes these commands by
 // accident, and the README lists what it does not see. The account's permissions are the control.
@@ -277,6 +278,19 @@ function endpointPath(endpoint: string): string {
   return endpoint.replace(/^https?:\/\/[^/]+/, '').replace(/^\/+/, '').replace(/\?.*$/s, '')
 }
 
+// gh api's one-letter options that take a value. gh reads a group of one-letter options (-iXPUT,
+// -if k=v) up to the first of these, whose value is the rest of the group, else the next word.
+const GH_API_VALUE_LETTERS = new Set(['X', 'f', 'F', 'H', 'q', 't', 'p'])
+
+function shortOption(a: string): { letter: string; value: string | undefined } | undefined {
+  if (!/^-[A-Za-z]/.test(a)) return undefined
+  for (let k = 1; k < a.length; k += 1) {
+    const letter = a[k] ?? ''
+    if (GH_API_VALUE_LETTERS.has(letter)) return { letter, value: k + 1 < a.length ? a.slice(k + 1) : undefined }
+  }
+  return undefined
+}
+
 function ghApi(args: readonly string[]): string | undefined {
   let method = ''
   let hasFields = false
@@ -290,17 +304,19 @@ function ghApi(args: readonly string[]): string | undefined {
   }
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i] ?? ''
-    if (a === '-X' || a === '--method') method = (args[++i] ?? '').toUpperCase()
+    const short = shortOption(a)
+    if (a === '--method') method = (args[++i] ?? '').toUpperCase()
     else if (a.startsWith('--method=')) method = a.slice(9).toUpperCase()
-    else if (/^-X./.test(a)) method = a.slice(2).toUpperCase()
-    else if (['-f', '-F', '--field', '--raw-field'].includes(a)) field(args[++i] ?? '')
-    else if (/^-[fF]./.test(a)) field(a.slice(2))
+    else if (short?.letter === 'X') method = (short.value ?? args[++i] ?? '').toUpperCase()
+    else if (['--field', '--raw-field'].includes(a)) field(args[++i] ?? '')
+    else if (short?.letter === 'f' || short?.letter === 'F') field(short.value ?? args[++i] ?? '')
     else if (/^--(field|raw-field)=/.test(a)) field(a.slice(a.indexOf('=') + 1))
     else if (a === '--input' || a.startsWith('--input=')) {
       hasFields = true
       hasInput = true
       if (a === '--input') i += 1
-    } else if (['-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache', '-p', '--preview'].includes(a)) i += 1
+    } else if (['--header', '--jq', '--template', '--hostname', '--cache', '--preview'].includes(a)) i += 1
+    else if (short !== undefined) i += short.value === undefined ? 1 : 0 // -H, -q, -t, -p
     else if (a === '--help' || a === '-h') isHelp = true
     else if (!a.startsWith('-') && endpoint === '') endpoint = endpointPath(a)
   }
@@ -485,6 +501,96 @@ function join(base: string, dir: string): string {
   if (dir === '' || dir === '.') return base
   if (base === '' || dir.startsWith('/') || dir.startsWith('~')) return dir
   return `${base}/${dir}`
+}
+
+// Whether a command only reads, so the session runs it itself and ask_owner_to_run does not queue
+// it: the guard holds none of it, nothing in it redirects into a file, and every simple command in
+// it is a known read, written plainly (no wrapper or assignment, so nothing handed to a shell). A
+// short list on purpose: anything unsure is not a read, so it stays queueable, and so does a
+// decision (no command at all).
+export function onlyReads(command: string, extra = ''): boolean {
+  // heldReason also holds a command the reader cannot read, so commands() below does not throw.
+  if (heldReason(command, extra) !== undefined) return false
+  // A redirection writes a file; only 2>&1 and >/dev/null are let through.
+  if (command.replace(/\d*>&\d+|[\d&]*>\s*\/dev\/null\b/g, '').includes('>')) return false
+  const list = commands(command)
+  return list.length > 0 && list.every(isRead)
+}
+
+const GIT_READS = new Set(['log', 'show', 'status', 'diff', 'fetch'])
+const SHELL_READS = new Set(['cat', 'ls', 'grep', 'head', 'tail', 'cd'])
+
+function isRead(argv: readonly string[]): boolean {
+  const name = program(argv[0])
+  const args = argv.slice(1)
+  if (SHELL_READS.has(name)) return true
+  switch (name) {
+    case 'sed': {
+      // sed -n, a script that only prints lines (1,20p), then files: no other option (-i, -e, -f, -E…).
+      const options = args.filter(a => a.startsWith('-'))
+      const words = args.filter(a => !a.startsWith('-'))
+      return options.length > 0 && options.every(a => ['-n', '--quiet', '--silent'].includes(a)) && /^[\d,$]+p$/.test(words[0] ?? '')
+    }
+    case 'gh':
+      return ghReads(args)
+    case 'git': {
+      // Before the subcommand only -C: -c, --exec-path and the rest may change what runs.
+      let i = 0
+      for (; i < args.length; i += 1) {
+        const a = args[i] ?? ''
+        if (a === '-C') i += 1
+        else if (!a.startsWith('-')) break
+        else return false
+      }
+      // --output writes a file; --ext-diff, --upload-pack and --exec run a program.
+      return GIT_READS.has(args[i] ?? '') && !args.some(a => /^--(output|ext-diff|upload-pack|exec)(=|$)/.test(a))
+    }
+    case 'aws':
+      return awsReads(args)
+    default:
+      return false
+  }
+}
+
+// gh issue|pr view|list|diff|checks, and gh api GET with no fields (a GraphQL call always has one).
+function ghReads(args: readonly string[]): boolean {
+  const words: string[] = []
+  for (let i = 0; i < args.length && words[0] !== 'api'; i += 1) {
+    const a = args[i] ?? ''
+    if (GH_VALUE_OPTIONS.has(a)) i += 1
+    else if (!a.startsWith('-')) words.push(a)
+  }
+  const [group = '', verb = ''] = words
+  if (group === 'issue' || group === 'pr') return ['view', 'list', 'diff', 'checks'].includes(verb)
+  if (group !== 'api') return false
+  const rest = args.slice(args.indexOf('api') + 1)
+  let endpoint = ''
+  for (let i = 0; i < rest.length; i += 1) {
+    const a = rest[i] ?? ''
+    const short = shortOption(a)
+    if (short?.letter === 'f' || short?.letter === 'F' || /^--(field|raw-field|input)(=|$)/.test(a)) return false
+    const method =
+      a === '--method' ? rest[++i] : a.startsWith('--method=') ? a.slice(9) : short?.letter === 'X' ? (short.value ?? rest[++i]) : undefined
+    if (method !== undefined && method.toUpperCase() !== 'GET') return false
+    if (['--header', '--jq', '--template', '--hostname', '--cache', '--preview'].includes(a)) i += 1
+    else if (short !== undefined && short.letter !== 'X' && short.value === undefined) i += 1 // -H, -q, -t, -p
+    else if (!a.startsWith('-') && endpoint === '') endpoint = endpointPath(a)
+  }
+  return endpoint !== ''
+}
+
+// The aws reads the guard lets through that are named get-, list-, describe- or head-, and s3 ls;
+// not sso login, configure or wait, which may need the owner.
+function awsReads(args: readonly string[]): boolean {
+  const words: string[] = []
+  for (let i = 0; i < args.length && words.length < 2; i += 1) {
+    const a = args[i] ?? ''
+    if (AWS_VALUE_OPTIONS.has(a)) i += 1
+    else if (!a.startsWith('-')) words.push(a)
+  }
+  const [service = '', op = ''] = words
+  if (service === 's3') return op === 'ls'
+  return ['get-', 'list-', 'describe-', 'head-'].some(p => op.startsWith(p))
 }
 
 // Turning this guard (or any plugin) off is the owner's choice.

@@ -6,6 +6,7 @@ export type Item = {
   command: string // empty for a decision that has no command ("approve the release")
   why: string
   from: string // the session that asked
+  agent?: string // the subagent of that session that asked: its description, else its type, else its id
   after?: string // the id of the item that must be done first
   status: Status
   code?: number // the exit code the marker reported

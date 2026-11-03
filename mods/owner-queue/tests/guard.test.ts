@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { heldReason, pushDirs, repoOf } from '../hooks/guard'
+import { heldReason, onlyReads, pushDirs, repoOf } from '../hooks/guard'
 import { commands } from '../hooks/shell'
 
 // One case per alternative of each rule, so narrowing a rule fails a test.
@@ -79,6 +79,10 @@ const HELD: [string, string][] = [
   ["gh api --method 'DELETE' repos/o/r/hooks/1", 'GitHub API write'],
   ['gh api --method=PATCH repos/o/r', 'GitHub API write'],
   ['gh api -XDELETE repos/o/r/hooks/9', 'GitHub API write'],
+  ['gh api -iXPUT repos/o/r/branches/main/protection', 'GitHub API write'],
+  ['gh api -iX PUT repos/o/r/branches/main/protection', 'GitHub API write'],
+  ['gh api repos/o/r/dispatches -iF event_type=x', 'GitHub API write'],
+  ['gh api repos/o/r/dispatches -ifevent_type=x', 'GitHub API write'],
   ['gh api -X DELETE repos/o/r/issues/9', 'GitHub API write'],
   ['gh api -X PUT repos/o/r/contents/pulls/1/merge -f message=x', 'GitHub API write'],
   ['gh api -X DELETE repos/o/r/contents/comments/1', 'GitHub API write'],
@@ -660,6 +664,114 @@ describe('the person\'s own expression', () => {
   })
   test('an invalid one holds nothing more', () => {
     expect(heldReason('kubectl delete pod x', '(')).toBeUndefined()
+  })
+})
+
+// What ask_owner_to_run refuses to queue: commands that only read, which the session runs itself.
+const ONLY_READS = [
+  'gh issue view 157 --comments',
+  'gh -R paarpet/pet-intelligence issue view 157',
+  'gh pr view 12 --json title,body',
+  'gh pr list --state open',
+  'gh pr diff 12',
+  'gh pr checks 12',
+  'gh issue list --label bug',
+  'gh api repos/o/r/pulls/1',
+  'gh api -X GET repos/o/r/issues',
+  'gh api --method=get repos/o/r/issues',
+  'git log --oneline -5',
+  'git -C ~/projects/ecc show HEAD',
+  'git status --short',
+  'git diff main...HEAD',
+  'git fetch origin',
+  'cat README.md',
+  'ls -la',
+  'grep -rn owner-queue mods',
+  "sed -n '1,20p' hooks/guard.ts",
+  'head -5 a.txt',
+  'tail -n 20 log.txt',
+  'aws sts get-caller-identity',
+  'aws --profile sandbox s3api list-buckets',
+  'aws s3 ls s3://bucket/',
+  'aws logs describe-log-groups',
+  'gh pr view 12 2>&1',
+  'gh pr list >/dev/null',
+  'gh pr list | grep draft',
+  "sed --quiet '1,5p' a.txt b.txt",
+  'gh api -i repos/o/r/pulls/1',
+  'gh api -iXGET repos/o/r/issues',
+  'cd ~/projects/ecc && git log -1',
+]
+
+// Commands it still queues: anything not surely a read, anything the guard holds, and a decision.
+const NOT_ONLY_READS = [
+  '',
+  'tofu apply',
+  'aws iam delete-role --role-name x',
+  'aws sso login --profile sandbox',
+  'aws configure set region us-east-2',
+  'aws lambda invoke --function-name f out.json',
+  'aws s3 cp s3://b/k .',
+  'gh pr merge 12 --squash',
+  'gh pr ready 12',
+  'gh issue comment 157 --body hi',
+  'gh run view 5',
+  'gh api -X PATCH repos/o/r/pulls/1 -f title=x',
+  'gh api -X DELETE repos/o/r/issues/comments/1',
+  'gh api repos/o/r/issues/1/comments -f body=x',
+  'gh api repos/o/r/issues -F title=x',
+  'gh api repos/o/r/issues --input body.json',
+  "gh api graphql -f query='query { viewer { login } }'",
+  'git push origin feat/x',
+  'git -c alias.log=!true log',
+  'git -c core.pager=less log',
+  'git --exec-path=/tmp/x log',
+  '   ',
+  'git diff --output=patch.diff',
+  'git checkout main',
+  'cat a > b',
+  'gh pr list > prs.txt',
+  "sed -i 's/a/b/' f",
+  "sed 's/a/b/' f",
+  "sed -n '1w out' f",
+  "sed '1,5p' f",
+  "sed -n -i '1p' f",
+  "sed -n 1p -e '1w /tmp/out' f",
+  'sed -n -Ei 1p f',
+  'sed -n --in 1p f',
+  'sed -n -f script.sed f',
+  'git fetch --upload-pack=touch origin',
+  'git fetch --upload-pack touch origin',
+  'git fetch --exec=touch origin',
+  'git diff --ext-diff',
+  'gh api -iXPOST repos/o/r/issues',
+  'gh api -iX POST repos/o/r/issues',
+  'gh api repos/o/r/issues/1/comments -if body=hi',
+  'gh api repos/o/r/issues -iFtitle=x',
+  'mv a b',
+  'cat $(touch x)',
+  'gh pr list | bash',
+  'env FOO=1 gh pr list',
+  'sudo cat /etc/shadow',
+  'bash -c "gh pr list"',
+  'ssh host cat f',
+  "git log 'unclosed",
+]
+
+describe('only reads', () => {
+  for (const command of ONLY_READS) {
+    test(`only reads: ${JSON.stringify(command)}`, () => {
+      expect(onlyReads(command)).toBe(true)
+      expect(heldReason(command)).toBeUndefined()
+    })
+  }
+  for (const command of NOT_ONLY_READS) {
+    test(`not only reads: ${JSON.stringify(command)}`, () => {
+      expect(onlyReads(command)).toBe(false)
+    })
+  }
+  test('never what the person\'s own expression holds', () => {
+    expect(onlyReads('gh pr list', 'gh\\s+pr\\s+list')).toBe(false)
   })
 })
 
