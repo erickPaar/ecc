@@ -14,7 +14,7 @@
       "name": "owner-queue",
       "source": "./mods/owner-queue",
       "description": "A mod: the commands only you run, in one queue in a pane of every session, with Copy; a guard sends held commands there, and items tick themselves when you run them with !",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     {
       "name": "side-panel",
