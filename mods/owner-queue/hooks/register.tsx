@@ -86,7 +86,7 @@ async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after'>, a
 async function agentName($: Engine, agentId: string): Promise<string> {
   try {
     const found = (await $.agent.list()).find(one => one.id === agentId)
-    const name = (found?.description.split('\n')[0] ?? '').trim() || found?.type
+    const name = (found?.description?.split('\n')[0] ?? '').trim() || found?.type
     if (name) return name
   } catch {
     // Named by its id.

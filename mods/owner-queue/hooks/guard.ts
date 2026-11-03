@@ -278,6 +278,19 @@ function endpointPath(endpoint: string): string {
   return endpoint.replace(/^https?:\/\/[^/]+/, '').replace(/^\/+/, '').replace(/\?.*$/s, '')
 }
 
+// gh api's one-letter options that take a value. gh reads a group of one-letter options (-iXPUT,
+// -if k=v) up to the first of these, whose value is the rest of the group, else the next word.
+const GH_API_VALUE_LETTERS = new Set(['X', 'f', 'F', 'H', 'q', 't', 'p'])
+
+function shortOption(a: string): { letter: string; value: string | undefined } | undefined {
+  if (!/^-[A-Za-z]/.test(a)) return undefined
+  for (let k = 1; k < a.length; k += 1) {
+    const letter = a[k] ?? ''
+    if (GH_API_VALUE_LETTERS.has(letter)) return { letter, value: k + 1 < a.length ? a.slice(k + 1) : undefined }
+  }
+  return undefined
+}
+
 function ghApi(args: readonly string[]): string | undefined {
   let method = ''
   let hasFields = false
@@ -291,17 +304,19 @@ function ghApi(args: readonly string[]): string | undefined {
   }
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i] ?? ''
-    if (a === '-X' || a === '--method') method = (args[++i] ?? '').toUpperCase()
+    const short = shortOption(a)
+    if (a === '--method') method = (args[++i] ?? '').toUpperCase()
     else if (a.startsWith('--method=')) method = a.slice(9).toUpperCase()
-    else if (/^-X./.test(a)) method = a.slice(2).toUpperCase()
-    else if (['-f', '-F', '--field', '--raw-field'].includes(a)) field(args[++i] ?? '')
-    else if (/^-[fF]./.test(a)) field(a.slice(2))
+    else if (short?.letter === 'X') method = (short.value ?? args[++i] ?? '').toUpperCase()
+    else if (['--field', '--raw-field'].includes(a)) field(args[++i] ?? '')
+    else if (short?.letter === 'f' || short?.letter === 'F') field(short.value ?? args[++i] ?? '')
     else if (/^--(field|raw-field)=/.test(a)) field(a.slice(a.indexOf('=') + 1))
     else if (a === '--input' || a.startsWith('--input=')) {
       hasFields = true
       hasInput = true
       if (a === '--input') i += 1
-    } else if (['-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache', '-p', '--preview'].includes(a)) i += 1
+    } else if (['--header', '--jq', '--template', '--hostname', '--cache', '--preview'].includes(a)) i += 1
+    else if (short !== undefined) i += short.value === undefined ? 1 : 0 // -H, -q, -t, -p
     else if (a === '--help' || a === '-h') isHelp = true
     else if (!a.startsWith('-') && endpoint === '') endpoint = endpointPath(a)
   }
@@ -510,9 +525,12 @@ function isRead(argv: readonly string[]): boolean {
   const args = argv.slice(1)
   if (SHELL_READS.has(name)) return true
   switch (name) {
-    case 'sed':
-      // sed -n with a script that only prints lines (1,20p): no w, no e, no -i.
-      return args.includes('-n') && args.some(a => /^[\d,$]+p$/.test(a)) && !args.some(a => /^(-i|--in-place)/.test(a))
+    case 'sed': {
+      // sed -n, a script that only prints lines (1,20p), then files: no other option (-i, -e, -f, -E…).
+      const options = args.filter(a => a.startsWith('-'))
+      const words = args.filter(a => !a.startsWith('-'))
+      return options.length > 0 && options.every(a => ['-n', '--quiet', '--silent'].includes(a)) && /^[\d,$]+p$/.test(words[0] ?? '')
+    }
     case 'gh':
       return ghReads(args)
     case 'git': {
@@ -524,7 +542,8 @@ function isRead(argv: readonly string[]): boolean {
         else if (!a.startsWith('-')) break
         else return false
       }
-      return GIT_READS.has(args[i] ?? '') && !args.some(a => a.startsWith('--output') || a === '--ext-diff')
+      // --output writes a file; --ext-diff, --upload-pack and --exec run a program.
+      return GIT_READS.has(args[i] ?? '') && !args.some(a => /^--(output|ext-diff|upload-pack|exec)(=|$)/.test(a))
     }
     case 'aws':
       return awsReads(args)
@@ -548,10 +567,13 @@ function ghReads(args: readonly string[]): boolean {
   let endpoint = ''
   for (let i = 0; i < rest.length; i += 1) {
     const a = rest[i] ?? ''
-    const method = a === '-X' || a === '--method' ? rest[++i] : /^(-X|--method=)(.+)$/.exec(a)?.[2]
+    const short = shortOption(a)
+    if (short?.letter === 'f' || short?.letter === 'F' || /^--(field|raw-field|input)(=|$)/.test(a)) return false
+    const method =
+      a === '--method' ? rest[++i] : a.startsWith('--method=') ? a.slice(9) : short?.letter === 'X' ? (short.value ?? rest[++i]) : undefined
     if (method !== undefined && method.toUpperCase() !== 'GET') return false
-    if (/^(-f|-F|--field|--raw-field|--input)/.test(a)) return false
-    if (['-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache', '-p', '--preview'].includes(a)) i += 1
+    if (['--header', '--jq', '--template', '--hostname', '--cache', '--preview'].includes(a)) i += 1
+    else if (short !== undefined && short.letter !== 'X' && short.value === undefined) i += 1 // -H, -q, -t, -p
     else if (!a.startsWith('-') && endpoint === '') endpoint = endpointPath(a)
   }
   return endpoint !== ''
