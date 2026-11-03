@@ -83,6 +83,8 @@ export const TEXT = {
   band: (n: number) => `${n} waiting for you · /queue`,
   held: (what: string, id: string) =>
     `owner-queue held this ${what}: only the owner runs it, with ! in a session. It is in the owner's queue as ${id}; tell the owner why it is needed, and carry on with what does not depend on it.`,
+  reads:
+    "Not queued: this command only reads, so run it yourself (in the folder it needs). The owner's queue is only for what only the owner can do: AWS changes, pushes to protected branches, repository settings and decisions.",
   queued: (id: string) =>
     `Queued as ${id}. The owner sees it in the queue pane and runs it with !; it ticks itself when it exits 0. Do not paste the command into your answer again.`,
 } as const

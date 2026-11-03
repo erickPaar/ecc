@@ -5,7 +5,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
-import { pushDirs } from './guard'
+import { onlyReads, pushDirs } from './guard'
 import type { Pushable } from './guard'
 import type { Item } from './queue'
 import { blocker, heldReason, ID, marker, newId, newNonce, stale, TEXT, visible, waitingFor, withMarker } from './queue'
@@ -63,19 +63,35 @@ async function refresh($: Engine): Promise<Item[]> {
   return now
 }
 
-// Queues a command, or answers with the item already waiting for it.
-async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after'>): Promise<Item> {
+// Queues a command, or answers with the item already waiting for it. `agentId` is the subagent's
+// loop the call came from (tool.call carries it; absent on the main loop).
+async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after'>, agentId?: string): Promise<Item> {
   const same = waitingFor(await load($, ctx.dir), fields)
   if (same !== undefined) return same
   const now = await $.clock.now()
   const from = (await read($, title)) || ctx.from
+  const agent = agentId === undefined ? undefined : await agentName($, agentId)
   let id = newId(now, Math.random())
   while (await $.fs.exists(`${ctx.dir}/${id}.json`)) id = newId(now, Math.random())
-  const item: Item = { ...fields, id, from, status: 'waiting', created: now, updated: now }
+  const item: Item = { ...fields, id, from, ...(agent !== undefined ? { agent } : {}), status: 'waiting', created: now, updated: now }
   await save($, item)
   await refresh($)
   if (ctx.paneMode === 'auto') await showPane($)
   return item
+}
+
+// The subagent that asked, as the agent list names it: the description its Agent call gave, else
+// its type. One the list does not hold (a workflow's agents, the engine's own forks, one already
+// gone) is named by the start of its id.
+async function agentName($: Engine, agentId: string): Promise<string> {
+  try {
+    const found = (await $.agent.list()).find(one => one.id === agentId)
+    const name = (found?.description.split('\n')[0] ?? '').trim() || found?.type
+    if (name) return name
+  } catch {
+    // Named by its id.
+  }
+  return `agent ${agentId.slice(0, 8)}`
 }
 
 async function setStatus($: Engine, item: Item, status: Item['status'], code?: number): Promise<void> {
@@ -148,7 +164,7 @@ export const register: Register = (on, options) => {
     await $.tool.register({
       name: 'ask_owner_to_run',
       description:
-        "Put a command only the owner may run (an infrastructure apply, an AWS write, a repository setting) or a decision only the owner makes in the owner's queue, instead of writing it in your answer. One call per command, in the order they must run; pass the id of the previous one as after. The owner sees it in a pane, runs it with !, and it ticks itself.",
+        "Put a command only the owner may run (an infrastructure apply, an AWS write, a repository setting) or a decision only the owner makes in the owner's queue, instead of writing it in your answer. One call per command, in the order they must run; pass the id of the previous one as after. The owner sees it in a pane, runs it with !, and it ticks itself. Never a read (gh pr view, git log, cat …): run those yourself.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -183,9 +199,12 @@ export const register: Register = (on, options) => {
     return { text: '' }
   })
 
+  // A command that only reads (guard.ts) is the session's to run: it is not queued.
   on('tool.call', { tool: QUEUE_TOOL }, async ($, e) => {
     const input = e as unknown as { command?: string; why?: string; after?: string }
-    const item = await add($, { command: (input.command ?? '').trim(), why: input.why ?? '', after: input.after || undefined })
+    const command = (input.command ?? '').trim()
+    if (onlyReads(command, extra)) return { result: TEXT.reads }
+    const item = await add($, { command, why: input.why ?? '', after: input.after || undefined }, e.agentId)
     return { result: TEXT.queued(item.id) }
   })
 
@@ -197,7 +216,7 @@ export const register: Register = (on, options) => {
     const what = heldReason(input.command, extra, local.found, local.pushable)
     if (what === undefined) return next(e)
     const why = typeof input.description === 'string' && input.description !== '' ? input.description : what
-    const item = await add($, { command: input.command.trim(), why })
+    const item = await add($, { command: input.command.trim(), why }, e.agentId)
     $.ui.toast(TEXT.held(what, item.id).split(':')[0] ?? what)
     return { deny: TEXT.held(what, item.id) }
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'owner-queue: its guard failed, so the command is held.' }))
@@ -260,6 +279,7 @@ export const register: Register = (on, options) => {
               </Text>
               <Text dimColor wrap="truncate-end">
                 {item.from}
+                {item.agent !== undefined ? ` › ${item.agent}` : ''}
                 {first !== undefined ? ` · ${TEXT.after(number(first))}` : ''}
                 {isFailed ? ` · ${TEXT.failed(item.code ?? -1)}` : ''}
               </Text>
