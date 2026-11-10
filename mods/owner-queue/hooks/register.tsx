@@ -11,13 +11,18 @@ import { onlyReads, pushDirs } from './guard'
 import type { Pushable } from './guard'
 import type { Item, Kind } from './queue'
 import {
-  age, blocker, fold, heldReason, ID, isKind, KIND_LABEL, KINDS, kindOf, listing, marker, newId, newNonce, nextItem, numberOf,
+  age, blocker, byLine, fold, heldReason, ID, isKind, KIND_LABEL, KINDS, kindOf, listing, marker, newId, newNonce, nextItem, numberOf,
   openItems, stale, summary, TEXT, visible, waitingFor, who, withMarker,
 } from './queue'
 
 const PANE = 'owner-queue'
 const TOOL = 'mcp__owner-queue__'
 const QUEUE_TOOL = `${TOOL}ask_owner_to_run`
+// The mod's own tools: they carry no shell command for the guard. Named one by one, so another
+// server's tool that happens to share the prefix is still guarded.
+const OWN_TOOLS = new Set([QUEUE_TOOL, `${TOOL}owner_queue_list`, `${TOOL}owner_queue_remove`, `${TOOL}owner_queue_done`])
+// How long Remove waits for its second press.
+const CONFIRM_MS = 5000
 const items = atom({ plugin: 'owner-queue', key: 'items' } as const, [] as Item[])
 const isPaneShown = atom({ plugin: 'owner-queue', key: 'isPaneShown' } as const, false)
 const title = atom({ plugin: 'owner-queue', key: 'title' } as const, '')
@@ -123,21 +128,29 @@ async function close($: Engine, id: string, status: 'done' | 'removed', by: stri
   const item = (await load($, ctx.dir)).find(one => one.id === id)
   if (item === undefined) return TEXT.missing(id)
   if (item.status !== 'waiting' && item.status !== 'failed') return TEXT.finished(id, item.status)
+  if (status === 'done' && item.running !== undefined) return TEXT.running(id) // the owner's run decides
   await setStatus($, item, status, { by, ...(note !== '' ? { note } : {}), ...extra })
   return TEXT.changed(id, status)
 }
 
 // Tells this session, in a row its model reads next turn, about each item it asked for that failed.
-// Marked first, so a second session process or the next refresh does not tell it again.
+// Marked first, so a second session process or the next refresh does not tell it again. The row
+// holds only the id (a plain word: load() checked it) and an integer exit code, never the why or
+// anything else from the file: any session, or a forged file, wrote those.
 async function tellFailures($: Engine, list: readonly Item[]): Promise<void> {
   if (ctx.session === '') return
   for (const item of list) {
     if (item.status !== 'failed' || item.session !== ctx.session || item.noted) continue
-    await save($, { ...item, noted: true })
     try {
-      await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: TEXT.failedNote(item) }] } })
+      await save($, { ...item, noted: true })
+      const note = TEXT.failedNote(item.id, Number.isInteger(item.code) ? (item.code as number) : -1)
+      try {
+        await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: note }] } })
+      } catch {
+        $.ui.toast(note.split('.')[0] ?? item.id)
+      }
     } catch {
-      $.ui.toast(TEXT.failedNote(item).split('.')[0] ?? item.id)
+      // The next refresh tries again.
     }
   }
 }
@@ -295,7 +308,10 @@ export const register: Register = (on, options) => {
     const input = e as unknown as { command?: string; why?: string; after?: string; replaces?: string; kind?: unknown }
     const command = (input.command ?? '').trim()
     if (onlyReads(command, extra)) return { result: TEXT.reads }
-    const kind: Kind = isKind(input.kind) ? input.kind : kindOf(command, command === '' ? undefined : heldReason(command, extra))
+    // The caller's kind, unless the guard reads an AWS change or an infrastructure change: that wins.
+    const reason = command === '' ? undefined : heldReason(command, extra)
+    const isAws = reason !== undefined && /AWS|infrastructure/.test(reason)
+    const kind: Kind = isKind(input.kind) && !isAws ? input.kind : kindOf(command, reason)
     const item = await add($, { command, why: input.why ?? '', after: input.after || undefined, kind }, e.agentId)
     let answer = TEXT.queued(item.id)
     const old = (input.replaces ?? '').trim()
@@ -333,7 +349,7 @@ export const register: Register = (on, options) => {
   // command is refused and not queued: only ask_owner_to_run adds to the queue.
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as { tool: string; command?: unknown }
-    if (input.tool.startsWith(TOOL) || typeof input.command !== 'string') return next(e)
+    if (OWN_TOOLS.has(input.tool) || typeof input.command !== 'string') return next(e)
     const local = await branches($, input.command, repos)
     const what = heldReason(input.command, extra, local.found, local.pushable)
     if (what === undefined) return next(e)
@@ -427,7 +443,7 @@ export const register: Register = (on, options) => {
               </Text>
               {item.by !== undefined && isFinished && (
                 <Text dimColor wrap="wrap">
-                  {`${item.status} by ${item.by}${item.note ? `: ${item.note}` : ''}`}
+                  {`${byLine(item)}${item.note ? `: ${item.note}` : ''}`}
                 </Text>
               )}
               {item.command !== '' && (
@@ -482,6 +498,7 @@ export const register: Register = (on, options) => {
                       // Two presses: the first asks, the second removes.
                       if ((await read($, confirm)) !== item.id) {
                         await update($, confirm, () => item.id)
+                        $.clock.after(CONFIRM_MS, () => void update($, confirm, id => (id === item.id ? '' : id)))
                         return
                       }
                       await update($, confirm, () => '')

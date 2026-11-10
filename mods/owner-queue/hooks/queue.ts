@@ -123,6 +123,12 @@ export function who(from: string, agent: string | undefined): string {
   return agent === undefined ? from : `${from} › ${agent}`
 }
 
+// Who closed an item, said so the owner tells his own Done from a session's word that it is done.
+export function byLine(item: Pick<Item, 'status' | 'by'>): string {
+  if (item.by === 'owner') return `${item.status} by you`
+  return item.status === 'done' ? `marked done by ${item.by} (not run from the queue)` : `removed by ${item.by}`
+}
+
 // The pane's first line: how many wait and fail, and what comes next.
 export function summary(items: readonly Item[]): string {
   const open = openItems(items)
@@ -162,7 +168,7 @@ export function listing(items: readonly Item[], now: number, isAll: boolean): st
         .join(' · ')
       const lines = [head, `  why: ${item.why}`]
       if (item.command !== '') lines.push(`  command: ${item.command}`)
-      if (item.by !== undefined) lines.push(`  ${item.status} by ${item.by}${item.note ? `: ${item.note}` : ''}`)
+      if (item.by !== undefined) lines.push(`  ${byLine(item)}${item.note ? `: ${item.note}` : ''}`)
       return lines.join('\n')
     })
     .join('\n')
@@ -205,9 +211,10 @@ export const TEXT = {
   badId: (id: string) => `Not changed: ${JSON.stringify(id)} is not an item id (ids are lowercase letters and digits; owner_queue_list shows them).`,
   missing: (id: string) => `Not changed: no item ${id} in the queue.`,
   finished: (id: string, status: string) => `Not changed: ${id} is ${status} already.`,
+  running: (id: string) => `Not changed: the owner is running ${id} now; its own run ticks it.`,
   needsText: (what: string) => `Not changed: give a ${what}; the owner reads it in the pane.`,
   changed: (id: string, status: string) =>
     `${id} is ${status}. This only changed the pane: nothing ran and nothing was approved. Items after it are no longer blocked.`,
-  failedNote: (item: { id: string; why: string; code?: number }) =>
-    `owner-queue: the owner ran ${item.id} (${item.why}) and it failed with exit ${item.code ?? -1}. It stays in the queue as failed; look into it, then queue a fix with replaces: ${item.id}, or remove it with owner_queue_remove.`,
+  failedNote: (id: string, code: number) =>
+    `owner-queue: the owner ran ${id} and it failed with exit ${code}; see owner_queue_list. It stays in the queue as failed: queue a fix with replaces: ${id}, or remove it with owner_queue_remove.`,
 } as const
