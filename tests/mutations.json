@@ -533,8 +533,8 @@
   {
     "label": "owner-queue: gh api explicit method",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    if (a === '-X' || a === '--method') method = (args[++i] ?? '').toUpperCase()\n",
-    "replace": "    if (a === '-X' || a === '--method') i += 1\n"
+    "find": "    if (a === '--method') method = (args[++i] ?? '').toUpperCase()\n",
+    "replace": "    if (a === '--method') i += 1\n"
   },
   {
     "label": "owner-queue: gh api --method=",
@@ -545,7 +545,7 @@
   {
     "label": "owner-queue: gh api -XMETHOD",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    else if (/^-X./.test(a)) method = a.slice(2).toUpperCase()\n",
+    "find": "    else if (short?.letter === 'X') method = (short.value ?? args[++i] ?? '').toUpperCase()\n",
     "replace": ""
   },
   {
@@ -791,7 +791,7 @@
   {
     "label": "owner-queue: the guard denies, never runs",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "    return { deny: TEXT.held(what, item.id) }",
+    "find": "    return { deny: TEXT.held(what) }",
     "replace": "    return next(e)"
   },
   {
@@ -801,16 +801,16 @@
     "replace": "next(e)"
   },
   {
-    "label": "owner-queue: a held command is queued",
+    "label": "owner-queue: a held command is not queued",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "    const item = await add($, { command: input.command.trim(), why })",
-    "replace": "    const item = { id: 'x' }"
+    "find": "    return { deny: TEXT.held(what) }",
+    "replace": "    await add($, { command: input.command.trim(), why: what }, e.agentId)\n    return { deny: TEXT.held(what) }"
   },
   {
-    "label": "owner-queue: the description is the why",
-    "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "typeof input.description === 'string' && input.description !== '' ? input.description : what",
-    "replace": "what"
+    "label": "owner-queue: the refusal points to ask_owner_to_run",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "If the owner really must run it, call ask_owner_to_run with the command and a why; ",
+    "replace": ""
   },
   {
     "label": "owner-queue: only the owner's origin ticks",
@@ -845,7 +845,7 @@
   {
     "label": "owner-queue: the queue folder is read on a timer",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "    $.clock.every(3000, () => void refresh($))\n",
+    "find": "    $.clock.every(3000, () => void refresh($).then(list => tellFailures($, list)))\n",
     "replace": ""
   },
   {
@@ -863,20 +863,20 @@
   {
     "label": "owner-queue: no Copy while blocked",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "              {!isDone && first === undefined && (",
-    "replace": "              {!isDone && ("
+    "find": "                  {first === undefined && item.command !== '' && (",
+    "replace": "                  {item.command !== '' && ("
   },
   {
     "label": "owner-queue: Copy carries the marker",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "await $.ui.copy({ text: withMarker(now, nonce), surface: e.surface })",
-    "replace": "await $.ui.copy({ text: now.command, surface: e.surface })"
+    "find": "await $.ui.copy({ text: withMarker(current, nonce), surface: e.surface })",
+    "replace": "await $.ui.copy({ text: current.command, surface: e.surface })"
   },
   {
     "label": "owner-queue: Remove removes",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "onPress={() => setStatus($, item, 'removed')}",
-    "replace": "onPress={() => undefined}"
+    "find": "if (current !== undefined) await setStatus($, current, 'removed', { by: 'owner', hidden: true })",
+    "replace": "if (current !== undefined) return"
   },
   {
     "label": "owner-queue: the band hides while the pane shows",
@@ -917,8 +917,8 @@
   {
     "label": "owner-queue: old finished items leave the pane",
     "file": "mods/owner-queue/hooks/queue.ts",
-    "find": "now - one.updated < 3_600_000",
-    "replace": "true"
+    "find": "!one.hidden && now - one.updated < HOUR &&",
+    "replace": "!one.hidden &&"
   },
   {
     "label": "owner-queue: only finished items are stale",
@@ -1379,8 +1379,8 @@
   {
     "label": "owner-queue: gh help passes",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "  if (isHelp) return undefined // prints the command's help\n  if (group",
-    "replace": "  if (group"
+    "find": "  if (isHelp) return undefined // prints the command's help\n  // --admin",
+    "replace": "  // --admin"
   },
   {
     "label": "owner-queue: gh deploy keys held",
@@ -1391,8 +1391,8 @@
   {
     "label": "owner-queue: gh api -fKEY=VALUE",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "    else if (/^-[fF]./.test(a)) field(a.slice(2))\n",
-    "replace": ""
+    "find": "    else if (short?.letter === 'f' || short?.letter === 'F') field(short.value ?? args[++i] ?? '')\n",
+    "replace": "    else if (short?.letter === 'f' || short?.letter === 'F') { if (short.value === undefined) field(args[++i] ?? '') }\n"
   },
   {
     "label": "owner-queue: gh api --field=",
@@ -1493,7 +1493,7 @@
   {
     "label": "owner-queue: the default branch holds",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "      if (DEFAULT_BRANCH.test(branch)) return DEFAULT_PUSH",
+    "find": "      if (DEFAULT_BRANCH.test(branch) && toDefault() !== undefined) return DEFAULT_PUSH",
     "replace": "      if (false) return DEFAULT_PUSH"
   },
   {
@@ -1523,8 +1523,8 @@
   {
     "label": "owner-queue: the guard reads the current branch",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "heldReason(input.command, extra, await branches($, input.command))",
-    "replace": "heldReason(input.command, extra)"
+    "find": "    const what = heldReason(input.command, extra, local.found, local.pushable)",
+    "replace": "    const what = heldReason(input.command, extra, new Map(), local.pushable)"
   },
   {
     "label": "owner-queue: the branch is read in the folder",
@@ -1553,7 +1553,7 @@
   {
     "label": "owner-queue: Copy stores the nonce",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "                        await save($, { ...now, nonce })\n",
+    "find": "                        await save($, { ...current, nonce })\n",
     "replace": ""
   },
   {
@@ -1591,8 +1591,8 @@
   {
     "label": "owner-queue: no Copy for a decision",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "                  {item.command !== '' && (\n                    <Button",
-    "replace": "                  {(\n                    <Button"
+    "find": "{first === undefined && item.command !== '' && (",
+    "replace": "{first === undefined && ("
   },
   {
     "label": "owner-queue: the pane redraws only on a change",
@@ -1957,8 +1957,8 @@
   {
     "label": "owner-queue: Copy reads the item again",
     "file": "mods/owner-queue/hooks/register.tsx",
-    "find": "                        if (now === undefined || (now.status !== 'waiting' && now.status !== 'failed')) {",
-    "replace": "                        if (now === undefined) {"
+    "find": "      if (found === undefined || (found.status !== 'waiting' && found.status !== 'failed')) {",
+    "replace": "      if (found === undefined) {"
   },
   {
     "label": "owner-queue: an empty destination is the source",
@@ -1981,8 +1981,8 @@
   {
     "label": "owner-queue: gh api endpoints normalised",
     "file": "mods/owner-queue/hooks/guard.ts",
-    "find": "endpoint = endpointPath(a)",
-    "replace": "endpoint = a"
+    "find": "    else if (a === '--help' || a === '-h') isHelp = true\n    else if (!a.startsWith('-') && endpoint === '') endpoint = endpointPath(a)",
+    "replace": "    else if (a === '--help' || a === '-h') isHelp = true\n    else if (!a.startsWith('-') && endpoint === '') endpoint = a"
   },
   {
     "label": "owner-queue: merges held",
@@ -2619,5 +2619,95 @@
     "file": "mods/owner-queue/hooks/register.tsx",
     "find": "if (branch !== undefined) remotes.set(dir, await pushRemote($, path, branch))",
     "replace": "if (branch !== undefined) remotes.set(dir, 'origin')"
+  },
+  {
+    "label": "owner-queue: remove/done check the id",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  if (!ID.test(id)) return TEXT.badId(id)\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: remove/done leave finished items alone",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  if (item.status !== 'waiting' && item.status !== 'failed') return TEXT.finished(id, item.status)\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: done waits for the owner's run",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "  if (status === 'done' && item.running !== undefined) return TEXT.running(id)",
+    "replace": "  if (false) return TEXT.running(id)"
+  },
+  {
+    "label": "owner-queue: remove/done need a reason",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "      if (text === '') return { result: TEXT.needsText(field) }\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: only the mod's own tools pass the guard",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "    if (OWN_TOOLS.has(input.tool) || typeof",
+    "replace": "    if (input.tool.startsWith(TOOL) || typeof"
+  },
+  {
+    "label": "owner-queue: the failure note goes to the session that asked",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": " || item.session !== ctx.session ||",
+    "replace": " ||"
+  },
+  {
+    "label": "owner-queue: the failure note is told once",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": " || item.noted) continue",
+    "replace": ") continue"
+  },
+  {
+    "label": "owner-queue: the failure note checks the code",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "Number.isInteger(item.code) ? (item.code as number) : -1",
+    "replace": "(item.code as number)"
+  },
+  {
+    "label": "owner-queue: Remove takes two presses",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "                      if ((await read($, confirm)) !== item.id) {",
+    "replace": "                      if (false) {"
+  },
+  {
+    "label": "owner-queue: the Remove confirm expires",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "$.clock.after(CONFIRM_MS, () => void update($, confirm, id => (id === item.id ? '' : id)))",
+    "replace": "undefined"
+  },
+  {
+    "label": "owner-queue: replaces removes the old item",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "    if (old !== '' && old !== item.id) {",
+    "replace": "    if (false) {"
+  },
+  {
+    "label": "owner-queue: an AWS change keeps its kind",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "isKind(input.kind) && !isAws ?",
+    "replace": "isKind(input.kind) ?"
+  },
+  {
+    "label": "owner-queue: the owner's Done reads differently",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "  if (item.by === 'owner') return `${item.status} by you`\n",
+    "replace": ""
+  },
+  {
+    "label": "owner-queue: next skips failed and blocked items",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "one.status === 'waiting' && blocker(one, items) === undefined)",
+    "replace": "blocker(one, items) === undefined)"
+  },
+  {
+    "label": "owner-queue: long commands fold",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "const isWhole = folded.more === 0 || whole.has(item.id)",
+    "replace": "const isWhole = true"
   }
 ]

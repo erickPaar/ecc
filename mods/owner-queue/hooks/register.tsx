@@ -1,20 +1,33 @@
 // owner-queue: the commands only the owner runs, in one queue every session on this machine shares.
-// Sessions add to it with the ask_owner_to_run tool; the guard sends held commands to it; the pane
-// shows it with a Copy button; the marker in the copied command ticks the item when the owner runs
-// it with ! (those commands reach session.append, never tool.call, so the guard never holds them).
+// Sessions add to it with the ask_owner_to_run tool, and list, remove or mark items done with the
+// owner_queue_* tools (which change only the pane: they run and approve nothing). The guard refuses
+// held commands without queueing them. The pane shows the queue with a Copy button; the marker in
+// the copied command ticks the item when the owner runs it with ! (those commands reach
+// session.append, never tool.call, so the guard never holds them).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import { onlyReads, pushDirs } from './guard'
 import type { Pushable } from './guard'
-import type { Item } from './queue'
-import { blocker, heldReason, ID, marker, newId, newNonce, stale, TEXT, visible, waitingFor, withMarker } from './queue'
+import type { Item, Kind } from './queue'
+import {
+  age, blocker, byLine, fold, heldReason, ID, isKind, KIND_LABEL, KINDS, kindOf, listing, marker, newId, newNonce, nextItem, numberOf,
+  openItems, stale, summary, TEXT, visible, waitingFor, who, withMarker,
+} from './queue'
 
 const PANE = 'owner-queue'
-const QUEUE_TOOL = 'mcp__owner-queue__ask_owner_to_run'
+const TOOL = 'mcp__owner-queue__'
+const QUEUE_TOOL = `${TOOL}ask_owner_to_run`
+// The mod's own tools: they carry no shell command for the guard. Named one by one, so another
+// server's tool that happens to share the prefix is still guarded.
+const OWN_TOOLS = new Set([QUEUE_TOOL, `${TOOL}owner_queue_list`, `${TOOL}owner_queue_remove`, `${TOOL}owner_queue_done`])
+// How long Remove waits for its second press.
+const CONFIRM_MS = 5000
 const items = atom({ plugin: 'owner-queue', key: 'items' } as const, [] as Item[])
 const isPaneShown = atom({ plugin: 'owner-queue', key: 'isPaneShown' } as const, false)
 const title = atom({ plugin: 'owner-queue', key: 'title' } as const, '')
+const confirm = atom({ plugin: 'owner-queue', key: 'confirm' } as const, '')
+const expanded = atom({ plugin: 'owner-queue', key: 'expanded' } as const, [] as string[])
 
 // The origins a person's own ! command row may carry. What is known: the types name `composer` the
 // person's own gesture at the terminal, as the engine stamps it; a probe on this build saw a
@@ -27,7 +40,8 @@ const OWNER_ORIGINS = new Set(['unclassified', 'composer'])
 
 // Set by register and session.start; a reload runs both again. `started` holds the items whose !
 // run this session saw start and has not seen print yet.
-const ctx = { dir: '', from: 'session', paneMode: 'auto', started: new Set<string>() }
+// `session` is the engine's id of this session, kept in the items it asks for.
+const ctx = { dir: '', from: 'session', session: '', paneMode: 'auto', started: new Set<string>() }
 
 async function folder($: Engine, configured: string): Promise<string> {
   if (configured !== '') return configured
@@ -65,19 +79,27 @@ async function refresh($: Engine): Promise<Item[]> {
 
 // Queues a command, or answers with the item already waiting for it. `agentId` is the subagent's
 // loop the call came from (tool.call carries it; absent on the main loop).
-async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after'>, agentId?: string): Promise<Item> {
+async function add($: Engine, fields: Pick<Item, 'command' | 'why' | 'after' | 'kind'>, agentId?: string): Promise<Item> {
   const same = waitingFor(await load($, ctx.dir), fields)
   if (same !== undefined) return same
   const now = await $.clock.now()
-  const from = (await read($, title)) || ctx.from
-  const agent = agentId === undefined ? undefined : await agentName($, agentId)
+  const { from, agent } = await asker($, agentId)
   let id = newId(now, Math.random())
   while (await $.fs.exists(`${ctx.dir}/${id}.json`)) id = newId(now, Math.random())
-  const item: Item = { ...fields, id, from, ...(agent !== undefined ? { agent } : {}), status: 'waiting', created: now, updated: now }
+  const item: Item = {
+    ...fields, id, from, ...(agent !== undefined ? { agent } : {}), ...(ctx.session !== '' ? { session: ctx.session } : {}),
+    status: 'waiting', created: now, updated: now,
+  }
   await save($, item)
   await refresh($)
   if (ctx.paneMode === 'auto') await showPane($)
   return item
+}
+
+// This session's name, and the subagent of it whose tool call this is.
+async function asker($: Engine, agentId?: string): Promise<{ from: string; agent?: string }> {
+  const from = (await read($, title)) || ctx.from
+  return agentId === undefined ? { from } : { from, agent: await agentName($, agentId) }
 }
 
 // The subagent that asked, as the agent list names it: the description its Agent call gave, else
@@ -94,9 +116,43 @@ async function agentName($: Engine, agentId: string): Promise<string> {
   return `agent ${agentId.slice(0, 8)}`
 }
 
-async function setStatus($: Engine, item: Item, status: Item['status'], code?: number): Promise<void> {
-  await save($, { ...item, status, code, nonce: undefined, running: undefined, updated: await $.clock.now() }) // a tick spends the nonce
+async function setStatus($: Engine, item: Item, status: Item['status'], extra: Partial<Item> = {}): Promise<void> {
+  await save($, { ...item, status, ...extra, nonce: undefined, running: undefined, updated: await $.clock.now() }) // a tick spends the nonce
   await refresh($)
+}
+
+// Removes an open item or marks it done for a tool call or the pane, recording who and why. Read
+// again first: another session may have finished it since. Answers what the caller is told.
+async function close($: Engine, id: string, status: 'done' | 'removed', by: string, note: string, extra: Partial<Item> = {}): Promise<string> {
+  if (!ID.test(id)) return TEXT.badId(id)
+  const item = (await load($, ctx.dir)).find(one => one.id === id)
+  if (item === undefined) return TEXT.missing(id)
+  if (item.status !== 'waiting' && item.status !== 'failed') return TEXT.finished(id, item.status)
+  if (status === 'done' && item.running !== undefined) return TEXT.running(id) // the owner's run decides
+  await setStatus($, item, status, { by, ...(note !== '' ? { note } : {}), ...extra })
+  return TEXT.changed(id, status)
+}
+
+// Tells this session, in a row its model reads next turn, about each item it asked for that failed.
+// Marked first, so a second session process or the next refresh does not tell it again. The row
+// holds only the id (a plain word: load() checked it) and an integer exit code, never the why or
+// anything else from the file: any session, or a forged file, wrote those.
+async function tellFailures($: Engine, list: readonly Item[]): Promise<void> {
+  if (ctx.session === '') return
+  for (const item of list) {
+    if (item.status !== 'failed' || item.session !== ctx.session || item.noted) continue
+    try {
+      await save($, { ...item, noted: true })
+      const note = TEXT.failedNote(item.id, Number.isInteger(item.code) ? (item.code as number) : -1)
+      try {
+        await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: note }] } })
+      } catch {
+        $.ui.toast(note.split('.')[0] ?? item.id)
+      }
+    } catch {
+      // The next refresh tries again.
+    }
+  }
 }
 
 async function showPane($: Engine): Promise<void> {
@@ -159,27 +215,75 @@ export const register: Register = (on, options) => {
     // Who asked, when the session has no title: the name czw gives each session it starts, else the
     // folder's name.
     ctx.from = (await $.env.get('CZW_SESSION')) || (e.cwd.split('/').pop() ?? ctx.from)
+    try {
+      ctx.session = await $.session.id()
+    } catch {
+      ctx.session = '' // No failure notes then; the pane still shows the failure.
+    }
     await $.process.run(['mkdir', '-p', ctx.dir])
     await $.command.register({ name: 'queue', description: 'Show the queue of commands only you run' })
     await $.tool.register({
       name: 'ask_owner_to_run',
       description:
-        "Put a command only the owner may run (an infrastructure apply, an AWS write, a repository setting) or a decision only the owner makes in the owner's queue, instead of writing it in your answer. One call per command, in the order they must run; pass the id of the previous one as after. The owner sees it in a pane, runs it with !, and it ticks itself. Never a read (gh pr view, git log, cat …): run those yourself.",
+        "Put a command only the owner may run (an infrastructure apply, an AWS write, a repository setting) or a decision only the owner makes in the owner's queue, instead of writing it in your answer. One call per command, in the order they must run; pass the id of the previous one as after. The owner sees it in a pane, runs it with !, and it ticks itself. Never a read (gh pr view, git log, cat …): run those yourself. To correct an item you queued, pass its id as replaces: the old one is removed.",
       inputSchema: {
         type: 'object',
         properties: {
           command: { type: 'string', description: 'The exact shell command, one line. Empty for a decision with no command.' },
           why: { type: 'string', description: 'A few words the owner reads first: what it does and what waits on it.' },
           after: { type: 'string', description: 'The id of the item that must be done first, if any.' },
+          replaces: { type: 'string', description: 'The id of an item this one replaces; that item is removed.' },
+          kind: { type: 'string', enum: [...KINDS], description: 'What it is; inferred when left out (decision when the command is empty).' },
         },
         required: ['command', 'why'],
       },
       isDeferred: false,
     })
+    await $.tool.register({
+      name: 'owner_queue_list',
+      description:
+        "List the owner's queue: each item's id, number, status (next marks the first the owner can run), kind, why, command, who asked, what it waits on and its age. By default what waits, what failed and what finished in the last hour; all lists everything kept.",
+      inputSchema: {
+        type: 'object',
+        properties: { all: { type: 'boolean', description: 'List every item kept, finished and removed ones included.' } },
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'owner_queue_remove',
+      description:
+        "Remove an item from the owner's queue that is no longer needed (asked by mistake, superseded, a read). It only changes the pane: nothing runs. The pane shows who removed it and why.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'The item id, as owner_queue_list shows it.' },
+          reason: { type: 'string', description: 'Why it is removed, a few words the owner reads.' },
+        },
+        required: ['id', 'reason'],
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'owner_queue_done',
+      description:
+        "Mark an item of the owner's queue done when you verified its effect yourself (the owner ran it elsewhere, or the change is already in place). It only changes the pane: nothing runs and nothing is approved. Say how you verified it.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'The item id, as owner_queue_list shows it.' },
+          note: { type: 'string', description: 'How you verified it is done.' },
+        },
+        required: ['id', 'note'],
+      },
+      isDeferred: false,
+    })
     await prune($)
     const now = await refresh($)
+    await tellFailures($, now)
     if (ctx.paneMode === 'auto' && visible(now, await $.clock.now()).length > 0) void showPane($)
-    $.clock.every(3000, () => void refresh($))
+    $.clock.every(3000, () => void refresh($).then(list => tellFailures($, list)))
+    // The ages in the pane move on with the clock, not with the queue.
+    $.clock.every(60_000, () => $.ui.invalidate('ui.render'))
     return next(e)
   })
 
@@ -201,24 +305,55 @@ export const register: Register = (on, options) => {
 
   // A command that only reads (guard.ts) is the session's to run: it is not queued.
   on('tool.call', { tool: QUEUE_TOOL }, async ($, e) => {
-    const input = e as unknown as { command?: string; why?: string; after?: string }
+    const input = e as unknown as { command?: string; why?: string; after?: string; replaces?: string; kind?: unknown }
     const command = (input.command ?? '').trim()
     if (onlyReads(command, extra)) return { result: TEXT.reads }
-    const item = await add($, { command, why: input.why ?? '', after: input.after || undefined }, e.agentId)
-    return { result: TEXT.queued(item.id) }
+    // The caller's kind, unless the guard reads an AWS change or an infrastructure change: that wins.
+    const reason = command === '' ? undefined : heldReason(command, extra)
+    const isAws = reason !== undefined && /AWS|infrastructure/.test(reason)
+    const kind: Kind = isKind(input.kind) && !isAws ? input.kind : kindOf(command, reason)
+    const item = await add($, { command, why: input.why ?? '', after: input.after || undefined, kind }, e.agentId)
+    let answer = TEXT.queued(item.id)
+    const old = (input.replaces ?? '').trim()
+    if (old !== '' && old !== item.id) {
+      const { from, agent } = await asker($, e.agentId)
+      const removed = await close($, old, 'removed', who(from, agent), TEXT.replaced(item.id))
+      answer += removed.startsWith('Not changed') ? ` replaces: ${removed}` : ` ${old} is removed: ${TEXT.replaced(item.id)}.`
+    }
+    return { result: answer }
   })
 
-  // The guard: every tool whose input is a shell command (Bash, Monitor, and any other).
+  on('tool.call', { tool: `${TOOL}owner_queue_list` }, async ($, e) => {
+    const input = e as unknown as { all?: unknown }
+    return { result: listing(await refresh($), await $.clock.now(), input.all === true) }
+  })
+
+  // Remove and done change only the pane, and any session may use them on any item: who did it
+  // and why are kept in the item and shown.
+  for (const [tool, status, field] of [
+    ['owner_queue_remove', 'removed', 'reason'],
+    ['owner_queue_done', 'done', 'note'],
+  ] as const) {
+    on('tool.call', { tool: `${TOOL}${tool}` }, async ($, e) => {
+      const input = e as unknown as Record<string, unknown>
+      const id = typeof input.id === 'string' ? input.id.trim() : ''
+      const given = input[field]
+      const text = typeof given === 'string' ? given.trim() : ''
+      if (text === '') return { result: TEXT.needsText(field) }
+      const { from, agent } = await asker($, e.agentId)
+      return { result: await close($, id, status, who(from, agent), text) }
+    })
+  }
+
+  // The guard: every tool whose input is a shell command (Bash, Monitor, and any other). A held
+  // command is refused and not queued: only ask_owner_to_run adds to the queue.
   on('tool.call', async ($, e, next) => {
-    const input = e as unknown as { tool: string; command?: unknown; description?: unknown }
-    if (input.tool === QUEUE_TOOL || typeof input.command !== 'string') return next(e)
+    const input = e as unknown as { tool: string; command?: unknown }
+    if (OWN_TOOLS.has(input.tool) || typeof input.command !== 'string') return next(e)
     const local = await branches($, input.command, repos)
     const what = heldReason(input.command, extra, local.found, local.pushable)
     if (what === undefined) return next(e)
-    const why = typeof input.description === 'string' && input.description !== '' ? input.description : what
-    const item = await add($, { command: input.command.trim(), why }, e.agentId)
-    $.ui.toast(TEXT.held(what, item.id).split(':')[0] ?? what)
-    return { deny: TEXT.held(what, item.id) }
+    return { deny: TEXT.held(what) }
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'owner-queue: its guard failed, so the command is held.' }))
 
   // The owner's ! commands arrive here as two rows: the command (<bash-input>), then its output,
@@ -240,7 +375,7 @@ export const register: Register = (on, options) => {
         const ran = marker(text)
         for (const item of await load($, ctx.dir)) {
           const isOwn = ran !== undefined && item.id === ran.id && (item.nonce === ran.nonce || item.running === ran.nonce)
-          if (isOwn) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', ran.code)
+          if (isOwn) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', { code: ran.code })
           else if (item.running !== undefined && ctx.started.has(item.id)) await save($, { ...item, running: undefined })
         }
         ctx.started.clear()
@@ -251,86 +386,139 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const ui = $.ui.resolve(e)
-    const { Box, Text, Button } = ui
+    const { Box, Text, Button } = $.ui.resolve(e)
     const all = await read($, items)
-    const shown = visible(all, await $.clock.now())
-    const open = shown.filter(one => one.status !== 'done')
-    const number = (item: Item) => open.indexOf(item) + 1
-    // d presses Done on the first item that can be acted on; c presses Copy on the first of those
-    // with a command.
-    const keyed = shown.find(item => item.status !== 'done' && blocker(item, all) === undefined)
-    const keyedCopy = shown.find(item => item.status !== 'done' && item.command !== '' && blocker(item, all) === undefined)
+    const now = await $.clock.now()
+    const shown = visible(all, now)
+    const open = openItems(all)
+    const next = nextItem(all)
+    const confirming = await read($, confirm)
+    const whole = new Set(await read($, expanded))
+    // d, x and e act on the next item; c copies the first runnable item with a command.
+    const keyedCopy = open.find(one => one.status === 'waiting' && one.command !== '' && blocker(one, all) === undefined)
+
+    // Reads the item again before acting: another session may have finished it since the pane was drawn.
+    const fresh = async (id: string): Promise<Item | undefined> => {
+      const found = (await load($, ctx.dir)).find(one => one.id === id)
+      if (found === undefined || (found.status !== 'waiting' && found.status !== 'failed')) {
+        await refresh($)
+        return undefined
+      }
+      return found
+    }
 
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text dimColor>c: Copy · d: Done (first that can be acted on) · Esc: back to the prompt</Text>
-        <Text bold color={open.length > 0 ? 'red' : 'green'}>
-          {open.length > 0 ? TEXT.title(open.length) : TEXT.empty}
+        <Text key="summary" bold wrap="truncate-end">
+          {summary(all)}
         </Text>
+        {open.length > 0 && <Text dimColor>{TEXT.keys}</Text>}
         {shown.map(item => {
           const first = blocker(item, all)
-          const isDone = item.status === 'done'
+          const number = numberOf(item, all)
+          const isNext = item === next
+          const isFinished = item.status === 'done' || item.status === 'removed'
           const isFailed = item.status === 'failed'
+          const state = isNext ? 'cyan' : isFailed ? 'red' : item.status === 'done' ? 'green' : undefined
+          const mark = item.status === 'done' ? '✓' : item.status === 'removed' ? '–' : `${number}`
+          const kind = KIND_LABEL[item.kind ?? kindOf(item.command, undefined)]
+          const folded = fold(item.command)
+          const isWhole = folded.more === 0 || whole.has(item.id)
+          const facts = [
+            item.id,
+            kind,
+            who(item.from, item.agent),
+            age(now - (isFinished ? item.updated : item.created)),
+            isNext ? TEXT.next : undefined,
+            first !== undefined ? TEXT.after(numberOf(first, all) ?? first.id) : undefined,
+            isFailed ? TEXT.failed(item.code ?? -1) : undefined,
+          ].filter(part => part !== undefined)
           return (
             <Box key={item.id} flexDirection="column" marginTop={1}>
-              <Text bold={!isDone} dimColor={isDone || first !== undefined} color={isFailed ? 'red' : isDone ? 'green' : undefined}>
-                {isDone ? '✓' : isFailed ? '✗' : `${number(item)}`} {item.why}
+              <Text bold={!isFinished} dimColor={isFinished || first !== undefined} color={state} wrap="wrap">
+                {`${mark} ${item.why}`}
               </Text>
               <Text dimColor wrap="truncate-end">
-                {item.from}
-                {item.agent !== undefined ? ` › ${item.agent}` : ''}
-                {first !== undefined ? ` · ${TEXT.after(number(first))}` : ''}
-                {isFailed ? ` · ${TEXT.failed(item.code ?? -1)}` : ''}
+                {facts.join(' · ')}
               </Text>
-              {item.command !== '' && (
+              {item.by !== undefined && isFinished && (
                 <Text dimColor wrap="wrap">
-                  {item.command}
+                  {`${byLine(item)}${item.note ? `: ${item.note}` : ''}`}
                 </Text>
               )}
-              {!isDone && first === undefined && (
+              {item.command !== '' && (
+                <Text dimColor wrap="wrap">
+                  {isWhole ? item.command : `${folded.head} ${TEXT.more(folded.more)}`}
+                </Text>
+              )}
+              {!isFinished && (
                 <Box>
-                  {item.command !== '' && (
+                  {folded.more > 0 && (
+                    <Button
+                      key={`fold-${item.id}`}
+                      label={isWhole ? TEXT.less : TEXT.expand}
+                      {...(isNext ? { hotkey: 'e' } : {})}
+                      onPress={() => update($, expanded, ids => (ids.includes(item.id) ? ids.filter(one => one !== item.id) : [...ids, item.id]))}
+                    />
+                  )}
+                  {first === undefined && item.command !== '' && (
                     <Button
                       key={`copy-${item.id}`}
                       label={TEXT.copy}
                       {...(item === keyedCopy ? { hotkey: 'c' } : {})}
                       onPress={async () => {
-                        // Read again: another session may have finished it since the pane was drawn.
-                        const now = (await load($, ctx.dir)).find(one => one.id === item.id)
-                        if (now === undefined || (now.status !== 'waiting' && now.status !== 'failed')) {
-                          await refresh($)
-                          return
-                        }
+                        await update($, confirm, () => '')
+                        const current = await fresh(item.id)
+                        if (current === undefined) return
                         // The nonce is in the item before it is on the clipboard, so a quick run ticks.
                         const nonce = newNonce()
-                        await save($, { ...now, nonce })
-                        await $.ui.copy({ text: withMarker(now, nonce), surface: e.surface })
+                        await save($, { ...current, nonce })
+                        await $.ui.copy({ text: withMarker(current, nonce), surface: e.surface })
                         $.ui.toast(TEXT.copied)
                       }}
                     />
                   )}
-                  <Button key={`done-${item.id}`} label={TEXT.done} {...(item === keyed ? { hotkey: 'd' } : {})}
+                  {first === undefined && (
+                    <Button
+                      key={`done-${item.id}`}
+                      label={TEXT.done}
+                      {...(isNext ? { hotkey: 'd' } : {})}
+                      onPress={async () => {
+                        await update($, confirm, () => '')
+                        const current = await fresh(item.id)
+                        if (current !== undefined) await setStatus($, current, 'done', { by: 'owner' })
+                      }}
+                    />
+                  )}
+                  <Button
+                    key={`remove-${item.id}`}
+                    label={confirming === item.id ? TEXT.confirm : TEXT.remove}
+                    {...(isNext ? { hotkey: 'x' } : {})}
                     onPress={async () => {
-                      // Read again, as Copy does: another session may have finished or removed it.
-                      const now = (await load($, ctx.dir)).find(one => one.id === item.id)
-                      if (now !== undefined && (now.status === 'waiting' || now.status === 'failed')) await setStatus($, now, 'done')
-                      else await refresh($)
+                      // Two presses: the first asks, the second removes.
+                      if ((await read($, confirm)) !== item.id) {
+                        await update($, confirm, () => item.id)
+                        $.clock.after(CONFIRM_MS, () => void update($, confirm, id => (id === item.id ? '' : id)))
+                        return
+                      }
+                      await update($, confirm, () => '')
+                      const current = await fresh(item.id)
+                      if (current !== undefined) await setStatus($, current, 'removed', { by: 'owner', hidden: true })
                     }}
                   />
-                  <Button key={`remove-${item.id}`} label={TEXT.remove} onPress={() => setStatus($, item, 'removed')} />
                 </Box>
               )}
             </Box>
           )
         })}
-        {shown.some(one => one.status === 'done') && (
+        {shown.some(one => one.status === 'done' || one.status === 'removed') && (
           <Box marginTop={1}>
             <Button
               key="clear"
               label={TEXT.clear}
               onPress={async () => {
-                for (const item of shown.filter(one => one.status === 'done')) await setStatus($, item, 'removed')
+                for (const item of shown.filter(one => one.status === 'done' || one.status === 'removed')) await save($, { ...item, hidden: true })
+                await refresh($)
               }}
             />
           </Box>
@@ -341,7 +529,7 @@ export const register: Register = (on, options) => {
 
   // One line above the prompt, only when the pane is not shown.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const open = visible(await read($, items), await $.clock.now()).filter(one => one.status !== 'done')
+    const open = openItems(await read($, items))
     if (open.length === 0 || (await read($, isPaneShown))) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     return (

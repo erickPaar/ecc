@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { Item } from '../types'
-import { blocker, canMark, ID, marker, newId, newNonce, stale, visible, waitingFor, withMarker } from '../hooks/queue'
+import {
+  age, blocker, canMark, fold, heldReason, ID, isKind, kindOf, listing, marker, newId, newNonce, nextItem, numberOf, stale, summary, visible,
+  waitingFor, withMarker,
+} from '../hooks/queue'
 
 describe('markers', () => {
   test('a copied command runs with pipefail, then prints its nonce and exit code', () => {
@@ -52,7 +55,7 @@ describe('order', () => {
     const list = [
       item('old', { status: 'done', updated: now - 3_600_001, created: 1 }),
       item('new', { status: 'done', updated: now - 10, created: 2 }),
-      item('gone', { status: 'removed', created: 3 }),
+      item('gone', { status: 'removed', created: 3, updated: now - 10 }),
       item('fail', { status: 'failed', created: 4 }),
       item('wait', { created: 5 }),
     ]
@@ -84,5 +87,59 @@ describe('order', () => {
     expect(waitingFor(list, { command: '', why: 'approve the release' })?.id).toBe('b')
     expect(waitingFor(list, { command: '', why: 'another decision' })).toBeUndefined()
     expect(waitingFor([item('a', { command: 'tofu apply', status: 'done' })], { command: 'tofu apply', why: 'x' })).toBeUndefined()
+  })
+})
+
+describe('0.3: what the pane and the list show', () => {
+  const now = 10_000_000
+  test('removed by a session shows for an hour; removed or cleared by the owner, or before 0.3.0, never', () => {
+    const list = [
+      item('bysession', { status: 'removed', by: 'api-design', note: 'dup', updated: now - 10, created: 1 }),
+      item('byowner', { status: 'removed', by: 'owner', hidden: true, updated: now - 10, created: 2 }),
+      item('legacy', { status: 'removed', updated: now - 10, created: 3 }),
+      item('cleared', { status: 'done', hidden: true, updated: now - 10, created: 4 }),
+      item('old', { status: 'removed', by: 'api-design', updated: now - 3_600_001, created: 5 }),
+    ]
+    expect(visible(list, now).map(one => one.id)).toEqual(['bysession'])
+  })
+  test('numbers count open items only, in the order asked; next is the first waiting and unblocked', () => {
+    const list = [
+      item('done', { status: 'done', created: 1 }),
+      item('fail', { status: 'failed', created: 2 }),
+      item('blocked', { after: 'fail', created: 3 }),
+      item('free', { created: 4 }),
+    ]
+    expect(list.map(one => numberOf(one, list))).toEqual([undefined, 1, 2, 3])
+    expect(nextItem(list)?.id).toBe('free')
+    expect(nextItem([item('a', { status: 'failed' })])).toBeUndefined()
+  })
+  test('the summary counts waiting and failed and names the next', () => {
+    expect(summary([])).toBe('Nothing waits for you.')
+    expect(summary([item('a', { why: 'backend apply', created: 1 }), item('b', { created: 2 })])).toBe('2 waiting · next: backend apply')
+    expect(summary([item('a', { status: 'failed' })])).toBe('1 failed')
+  })
+  test('the kind is inferred from the guard\'s reason, then the program', () => {
+    expect(kindOf('', undefined)).toBe('decision')
+    expect(kindOf('   ', 'anything')).toBe('decision')
+    expect(kindOf('make apply STACK=x', heldReason('make apply STACK=x'))).toBe('aws-change')
+    expect(kindOf('aws s3 rm s3://b/k', heldReason('aws s3 rm s3://b/k'))).toBe('aws-change')
+    expect(kindOf('git push origin main', heldReason('git push origin main'))).toBe('github')
+    expect(kindOf('gh api -X PUT repos/a/b/x', heldReason('gh api -X PUT repos/a/b/x'))).toBe('github')
+    expect(kindOf('gh pr ready 3', undefined)).toBe('github')
+    expect(kindOf('rc start ecc main', undefined)).toBe('desktop')
+    expect(kindOf('make check', undefined)).toBe('local')
+    expect(isKind('desktop')).toBe(true)
+    expect(isKind('Desktop')).toBe(false)
+  })
+  test('a command folds to its first line, and ages are short', () => {
+    expect(fold('a\nb\nc')).toEqual({ head: 'a', more: 2 })
+    expect(fold('one line')).toEqual({ head: 'one line', more: 0 })
+    expect([0, 59_999, 60_000, 3_599_999, 3_600_000, 86_400_000, -5].map(age)).toEqual(['now', 'now', '1 min', '59 min', '1 h', '1 d', 'now'])
+  })
+  test('the list names who removed an item and why', () => {
+    const list = [item('a', { status: 'removed', by: 'api-design › P2', note: 'dup', updated: now - 10 })]
+    expect(listing(list, now, false)).toContain('removed by api-design › P2: dup')
+    expect(listing([], now, false)).toContain('Nothing waits')
+    expect(listing([], now, true)).toBe('The queue is empty.')
   })
 })
