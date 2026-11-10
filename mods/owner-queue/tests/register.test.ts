@@ -8,12 +8,12 @@ const OPTIONS = { dir: DIR, pane: 'off' }
 const AUTO = { dir: DIR, pane: 'auto' }
 
 type World = { files: Map<string, string>; copied: string[]; opened: string[]; ran: string[][]; checked: string[] }
-type Setup = { isFull?: boolean; isPlaced?: boolean; branch?: string; origin?: string; config?: Record<string, string>; env?: Record<string, string>; taken?: number }
+type Setup = { cwdFails?: boolean; isFull?: boolean; isPlaced?: boolean; branch?: string; origin?: string; config?: Record<string, string>; env?: Record<string, string>; taken?: number }
 
 // A folder in memory beneath the plugin: what $.fs and $.process.run reach in a session, and the
 // rest of what the plugin asks of a session, answered plainly. `branch` is what git reads as the
 // current branch and `origin` the origin's URL; without one, git fails. The first `taken` item files asked about exist.
-function world(on: On, { isFull = false, isPlaced = false, branch, origin, config = {}, env = {}, taken = 0 }: Setup = {}): World {
+function world(on: On, { cwdFails = false, isFull = false, isPlaced = false, branch, origin, config = {}, env = {}, taken = 0 }: Setup = {}): World {
   mock.env(on, env)
   const files = new Map<string, string>()
   const ran: string[][] = []
@@ -47,7 +47,10 @@ function world(on: On, { isFull = false, isPlaced = false, branch, origin, confi
     if (e.argv[0] === 'git') return { value: branch === undefined ? { exitCode: 128, stdout: '', stderr: 'not a repository' } : { exitCode: 0, stdout: `${branch}\n`, stderr: '' } } as never
     return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
   })
-  on('session.cwd', () => ({ value: '/home/x/projects/my-api' }) as never)
+  on('session.cwd', () => {
+    if (cwdFails) throw new Error('no cwd')
+    return { value: '/home/x/projects/my-api' } as never
+  })
   on('session.start', (_$, e) => ({ cwd: e.cwd }) as never)
   on('classic.SessionStart', () => ({}) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
@@ -157,6 +160,14 @@ describe('the guard', () => {
     const ran = await $.tool.call({ tool: 'Bash', command: 'tofu plan' } as never)
     expect(ran.deny).toBeUndefined()
     expect(queued(w)).toEqual([])
+  })
+
+  test('when the guard itself fails, the command is held', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on)
+    world(on, { cwdFails: true })
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' }, text: 'ran' }) as never)
+    await start($)
+    expect(String((await $.tool.call({ tool: 'Bash', command: 'git push' } as never)).deny)).toContain('its guard failed')
   })
 
   test('when the queue cannot be written, the held command is still refused', { options: OPTIONS }, async ($, on) => {
