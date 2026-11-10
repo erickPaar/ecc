@@ -13,8 +13,8 @@
     {
       "name": "owner-queue",
       "source": "./mods/owner-queue",
-      "description": "A mod: the commands only you run, in one queue in a pane of every session, with Copy; a guard sends held commands there, and items tick themselves when you run them with !",
-      "version": "0.2.0"
+      "description": "A mod: the commands only you run, in one queue in a pane of every session, with Copy; sessions add, list, remove and mark items done, a guard refuses held commands, and items tick themselves when you run them with !",
+      "version": "0.3.0"
     },
     {
       "name": "side-panel",
