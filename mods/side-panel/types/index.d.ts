@@ -35,6 +35,27 @@ export type Run = {
   beat?: number // when its session last marked it alive
 }
 
+// A Claude session alive on the remote machine, from its ~/.claude/sessions file.
+export type RemoteSession = {
+  name: string // its name, else its folder's
+  cwd: string
+  status?: string // busy, idle, ... where that Claude Code writes it
+  kind?: string // interactive, or how it was started
+  started?: number
+}
+
+// The remote machine as last read over ssh: its sessions, its subagent runs (this mod's run files
+// there) and the lines its command printed, or why it could not be read.
+export type Remote = {
+  host: string
+  read: number // when it was last asked
+  sessions: RemoteSession[]
+  runs: Run[]
+  lines: Line[]
+  error?: string // why it could not be read; shown red, in place of the rest
+  note?: string // the remote command failed; shown dim
+}
+
 export type Board = {
   pulls: Pull[]
   lines: Line[]
@@ -49,6 +70,7 @@ declare module 'claude-code' {
       aws: Aws
       today: Today
       runs: Run[] // every session's runs, as last read
+      remote: Remote // the other machine, read over ssh when `remote` is set
       title: string // the session's title, when the engine passes one; kept across reloads
     }
   }

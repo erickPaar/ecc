@@ -2709,5 +2709,65 @@
     "file": "mods/owner-queue/hooks/register.tsx",
     "find": "const isWhole = folded.more === 0 || whole.has(item.id)",
     "replace": "const isWhole = true"
+  },
+  {
+    "label": "side-panel remote: a host ssh would read as an option is refused",
+    "file": "mods/side-panel/hooks/remote.ts",
+    "find": "return /^[A-Za-z0-9][\\w.@-]*$/.test(host) ? host : ''",
+    "replace": "return host"
+  },
+  {
+    "label": "side-panel remote: ssh never asks",
+    "file": "mods/side-panel/hooks/remote.ts",
+    "find": "    '-o', 'BatchMode=yes',\n",
+    "replace": ""
+  },
+  {
+    "label": "side-panel remote: the call is bounded on this machine",
+    "file": "mods/side-panel/hooks/remote.ts",
+    "find": "    'timeout', String(REMOTE_WAIT_S),\n",
+    "replace": ""
+  },
+  {
+    "label": "side-panel remote: a session file of an earlier process is skipped",
+    "file": "mods/side-panel/hooks/remote.ts",
+    "find": "if (f.procStart !== undefined && f.procStart !== m[1]) return undefined",
+    "replace": ""
+  },
+  {
+    "label": "side-panel remote: only claude processes count as sessions",
+    "file": "mods/side-panel/hooks/remote.ts",
+    "find": "'  [ \"$(cat /proc/$p/comm 2>/dev/null)\" = claude ] || continue',\n",
+    "replace": ""
+  },
+  {
+    "label": "side-panel remote: a Tailscale login says what to run",
+    "file": "mods/side-panel/hooks/remote.ts",
+    "find": "if (/login\\.tailscale\\.com|Tailscale SSH requires/i.test(ran.stderr))",
+    "replace": "if (false)"
+  },
+  {
+    "label": "side-panel remote: a cut answer is an error",
+    "file": "mods/side-panel/hooks/remote.ts",
+    "find": "  if (cut) return `${host}: the answer stopped early`\n",
+    "replace": ""
+  },
+  {
+    "label": "side-panel remote: a failure hides what was shown before",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "      ? { host: cfg.remote, read, sessions: [], runs: [], lines: [], error }",
+    "replace": "      ? { ...(await read($, remote)), host: cfg.remote, read, error }"
+  },
+  {
+    "label": "side-panel remote: no remote, no ssh",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "  if (cfg.remote === '') return\n  const ran",
+    "replace": "  const ran"
+  },
+  {
+    "label": "side-panel remote: a session's runs are drawn beneath it",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "{(groups.find(g => g.session === s.name)?.runs ?? []).map(r => runLine(ui, r, at, '    ', 'rr'))}",
+    "replace": ""
   }
 ]
