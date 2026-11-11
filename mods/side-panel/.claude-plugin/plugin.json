@@ -1,7 +1,7 @@
 {
   "name": "side-panel",
-  "version": "0.1.0",
-  "description": "Panes beside the transcript of the sessions you name: status (open pull requests, each new head with a Review button, and sections your own command prints), aws (time left on an SSO login) and today (merged today, heads waiting for a first review); keys 1-4 switch tabs.",
+  "version": "0.2.0",
+  "description": "Panes beside the transcript of the sessions you name: status (open pull requests, each new head with a Review button, sections your own command prints, and what runs on a remote host over ssh), aws (time left on an SSO login) and today (merged today, heads waiting for a first review); keys 1-4 switch tabs.",
   "types": "./types/index.d.ts",
   "userConfig": {
     "sessions": {
@@ -45,6 +45,24 @@
       "title": "AWS profile",
       "description": "The AWS SSO profile whose login the aws tab watches: time left, red 30 minutes before it expires, and a button that queues aws sso login for it in owner-queue. Empty is management.",
       "default": "management"
+    },
+    "remote": {
+      "type": "string",
+      "title": "Remote host",
+      "description": "An ssh host (or ~/.ssh/config alias) whose Claude sessions, their subagent runs and your remote command the status tab shows, read over one read-only ssh call per refresh (BatchMode, so it needs a key or Tailscale SSH). Empty shows none.",
+      "default": ""
+    },
+    "remote_label": {
+      "type": "string",
+      "title": "Remote heading",
+      "description": "The heading of the remote section, for example Desktop. Empty uses the host.",
+      "default": ""
+    },
+    "remote_sections": {
+      "type": "string",
+      "title": "Remote sections command",
+      "description": "A command run on the remote host (bash, login shell) whose output shows in the remote section, in the sections format: ## headings; a line starting with ● red, ✓ green, ⠋ blue. Empty shows none.",
+      "default": ""
     },
     "every": {
       "type": "string",
