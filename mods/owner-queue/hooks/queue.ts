@@ -25,7 +25,10 @@ export function canMark(command: string): boolean {
 export function marker(row: string): { id: string; nonce: string; code: number } | undefined {
   const out = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/.exec(row)
   if (out === null) return undefined
-  const last = (out[1] ?? '').replace(/\s+$/, '').split('\n').pop() ?? ''
+  // Windows programs (wsl.exe, schtasks.exe) print UTF-16: their NUL bytes and carriage returns
+  // reach the row, and the marker's line would start with one of them. They are dropped first.
+  const text = (out[1] ?? '').replace(/[\u0000\r]/g, '')
+  const last = (text.replace(/\s+$/, '').split('\n').pop() ?? '').trim()
   const [, id, nonce, code] = /^oq:([a-z0-9]+):([a-z0-9]+):(\d+)$/.exec(last) ?? []
   return id === undefined || nonce === undefined ? undefined : { id, nonce, code: Number(code) }
 }
