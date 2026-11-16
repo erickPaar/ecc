@@ -8,7 +8,7 @@ import { atom, read, update } from 'claude-code'
 import type { Engine, Register } from 'claude-code'
 
 import type { Asked, Aws, Board, Pull, Remote, Run, Today } from '../types'
-import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
+import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today, toneProps } from './panel'
 import { readAnswer, REMOTE_WAIT_S, remoteArgv, remoteError, remoteHost, remoteScript } from './remote'
 import { BEAT_EVERY, elapsed, fileName, fromAgent, isOld, label, parse, sections as runSections } from './runs'
 
@@ -398,7 +398,7 @@ async function remoteView($: Engine, ui: ReturnType<Engine['ui']['resolve']>, at
             <Text bold>{line.text}</Text>
           </Box>
         ) : (
-          <Text key={`rl${i}`} color={line.tone} wrap="truncate-end">
+          <Text key={`rl${i}`} {...toneProps(line.tone)} wrap="truncate-end">
             {line.text}
           </Text>
         ),
@@ -594,7 +594,7 @@ export const register: Register = (on, options) => {
               <Text bold>{line.text}</Text>
             </Box>
           ) : (
-            <Text key={`l${i}`} color={line.tone === 'dim' ? undefined : line.tone} dimColor={line.tone === 'dim'} wrap="truncate-end">
+            <Text key={`l${i}`} {...toneProps(line.tone)} wrap="truncate-end">
               {line.text}
             </Text>
           ),

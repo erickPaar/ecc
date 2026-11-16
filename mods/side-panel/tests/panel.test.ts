@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { elapsed, fileName, fromAgent, isOld, label, parse, sections } from '../hooks/runs'
 
-import { awsProfile, left, lines, logins, merged, names, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from '../hooks/panel'
+import { awsProfile, left, lines, logins, merged, names, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today, toneProps } from '../hooks/panel'
 
 const SHA = 'b5687a5e1c0d2f3a4b5c6d7e8f9a0b1c2d3e4f5a'
 
@@ -85,6 +85,11 @@ describe('sections', () => {
       { kind: 'heading', text: 'Disk' },
       { kind: 'text', text: '✓ 27% used', tone: 'green' },
     ])
+  })
+  test('dim draws as a style, every other tone as its colour, no tone as nothing', () => {
+    expect(toneProps('dim')).toEqual({ dimColor: true })
+    expect(toneProps('yellow')).toEqual({ color: 'yellow' })
+    expect(toneProps(undefined)).toEqual({})
   })
   test('yellow and dim lines; any other first character has no tone', () => {
     expect(lines('◆ waits on you\n· parked\nplain\n- dash')).toEqual([

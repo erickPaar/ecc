@@ -88,6 +88,12 @@ export function lines(output: string): Line[] {
     })
 }
 
+// How a line's tone is drawn: dim is a style, not a colour.
+export function toneProps(tone: Line['tone']): { color?: 'red' | 'green' | 'blue' | 'yellow'; dimColor?: true } {
+  if (tone === 'dim') return { dimColor: true }
+  return tone ? { color: tone } : {}
+}
+
 export function repos(setting: string): string[] {
   return setting.split(/\s+/).filter(repo => /^[\w.-]+\/[\w.-]+$/.test(repo))
 }
