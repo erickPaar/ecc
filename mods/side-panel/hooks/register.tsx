@@ -10,7 +10,7 @@ import type { Engine, Register } from 'claude-code'
 import type { Asked, Aws, Board, Pull, Remote, Run, Today } from '../types'
 import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today, toneProps } from './panel'
 import { readAnswer, REMOTE_WAIT_S, remoteArgv, remoteError, remoteHost, remoteScript } from './remote'
-import { BEAT_EVERY, elapsed, fileName, fromAgent, isOld, label, parse, sections as runSections } from './runs'
+import { BEAT_EVERY, categories, elapsed, fileName, fromAgent, isOld, label, parse, sections as runSections } from './runs'
 
 const PANE = 'side-panel'
 const AWS_PANE = 'side-panel-aws'
@@ -336,8 +336,18 @@ async function todayView($: Engine, ui: ReturnType<Engine['ui']['resolve']>) {
   )
 }
 
-// One subagent run's line, as the Running section draws it.
-function runLine(ui: ReturnType<Engine['ui']['resolve']>, r: ReturnType<typeof runSections>[number]['runs'][number], at: number, indent: string, keyPrefix: string) {
+// Each kind of work's heading colour in the Running section.
+const CATEGORY_COLOR: Record<string, 'magenta' | 'cyan' | 'yellow' | 'blue'> = { Reviews: 'magenta', Builds: 'cyan', Checks: 'yellow', Research: 'blue' }
+
+// "2 running · 1 stale · 3 done · 1 failed · 1 stopped", the last hour's, leaving out the zeros; a stale run is
+// counted as stale, not running.
+function categoryCounts(c: ReturnType<typeof categories>[number]): string {
+  const parts = [[c.running.length - c.stale, 'running'], [c.stale, 'stale'], [c.done, 'done'], [c.failed.length, 'failed'], [c.stopped, 'stopped']] as const
+  return parts.filter(([n]) => n > 0).map(([n, word]) => `${n} ${word}`).join(' · ')
+}
+
+// One subagent run's line, as the Running section draws it; withSession puts the session's name first.
+function runLine(ui: ReturnType<Engine['ui']['resolve']>, r: ReturnType<typeof runSections>[number]['runs'][number], at: number, indent: string, keyPrefix: string, withSession = false) {
   const { Text } = ui
   return (
     <Text
@@ -347,7 +357,7 @@ function runLine(ui: ReturnType<Engine['ui']['resolve']>, r: ReturnType<typeof r
       color={r.isStale || r.status === 'failed' ? 'red' : r.status === 'done' ? 'green' : undefined}
     >
       {indent}
-      {r.status === 'running' ? (r.isStale ? '? stale' : `⠋ ${elapsed(at - r.started)}`) : r.status === 'done' ? '✓' : r.status === 'failed' ? '✗' : '■'} {r.label} · {r.type}
+      {r.status === 'running' ? (r.isStale ? '? stale' : `⠋ ${elapsed(at - r.started)}`) : r.status === 'done' ? '✓' : r.status === 'failed' ? '✗' : '■'} {withSession ? `${r.session} · ` : ''}{r.label} · {r.type}
       {r.model ? ` · ${r.model}` : ''}
       {r.effort ? ` · ${r.effort}` : ''}
     </Text>
@@ -536,7 +546,7 @@ export const register: Register = (on, options) => {
     const at = await $.clock.now()
     const open = now.pulls.filter(pull => !pull.isDraft)
     const drafts = now.pulls.filter(pull => pull.isDraft)
-    const running = runSections(await read($, runsAtom), at)
+    const running = categories(await read($, runsAtom), at)
 
     return (
       <Box flexDirection="column" paddingX={1}>
@@ -581,10 +591,12 @@ export const register: Register = (on, options) => {
             <Text bold>Running</Text>
           </Box>
         )}
-        {running.map(group => (
-          <Box key={`s-${group.session}`} flexDirection="column">
-            <Text color="blue">{group.session}</Text>
-            {group.runs.map(r => runLine(ui, r, at, '  ', 'r'))}
+        {running.map(c => (
+          <Box key={`c-${c.name}`} flexDirection="column">
+            <Text color={CATEGORY_COLOR[c.name]}>
+              {c.name} <Text dimColor>{categoryCounts(c)}</Text>
+            </Text>
+            {[...c.running, ...c.failed].map(r => runLine(ui, r, at, '  ', 'r', true))}
           </Box>
         ))}
         {cfg.remote !== '' && (await remoteView($, ui, at))}

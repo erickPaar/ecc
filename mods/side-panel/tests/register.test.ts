@@ -533,7 +533,7 @@ describe('running', () => {
     expect(w.written.size).toBe(0)
   })
 
-  test('the panel shows the runs by session: running with elapsed time, stale, finished dimmed; old files deleted', { options: OPTIONS }, async ($, on) => {
+  test('the panel shows the runs by kind of work: running with elapsed time and session, stale, finished as counts; old files deleted', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: NOW })
     const run = (session: string, id: string, extra: object) => ({ session, id, label: `run ${id}`, type: 'Explore', isBackground: true, started: NOW - 5 * 60_000, status: 'running', beat: NOW - 10_000, ...extra })
     const w = world(on, {
@@ -548,10 +548,8 @@ describe('running', () => {
     })
     await start($, 'coordinator')
     const shown = await drawn($)
-    for (const k of ['Running', '"api"', '"content"', '⠋ 5m', 'run a1', '? stale', 'run a2', 'run a3']) expect(shown).toContain(k)
-    expect(shown).not.toContain('run a4')
-    expect(shown).not.toContain('run a5')
-    expect(shown.indexOf('run a1')).toBeLessThan(shown.indexOf('run a3'))
+    for (const k of ['Running', 'Research', '1 running · 1 stale · 1 done', '⠋ 5m', '"api · ","run a1"', '? stale', '"api · ","run a2"']) expect(shown).toContain(k)
+    for (const k of ['run a3', 'run a4', 'run a5']) expect(shown).not.toContain(k)
     expect(w.ran.find(argv => argv[0] === 'rm')).toEqual(['rm', '-f', expect.stringMatching(/content--a5\.json$/)])
   })
 })

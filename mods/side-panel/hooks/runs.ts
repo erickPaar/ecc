@@ -77,6 +77,54 @@ export function sections(runs: readonly Run[], now: number): { session: string; 
     }))
 }
 
+// The kinds of work the Running section groups runs by, in the order it shows them. A run's kind is told from
+// its agent type and its label (the description its session gave): a label that starts with a building verb
+// ("Fix review findings", "Add tests") is a build whatever follows; otherwise the first kind whose words match
+// wins, reviews before checks before builds before research. Words are whole (\b on both sides).
+export const CATEGORY_ORDER = ['Reviews', 'Builds', 'Checks', 'Research'] as const
+
+const LEADS_A_BUILD = /^\W*(fix|address|apply|implement|add|build|write|port|refactor)\b/i
+const KINDS: readonly { name: (typeof CATEGORY_ORDER)[number]; type?: RegExp; label: RegExp }[] = [
+  { name: 'Reviews', type: /review|verif/i, label: /\b(review|reviews|revisão|delta|re-?check|verify|audit|grade)\b/i },
+  { name: 'Checks', label: /\b(mutation|mutate|make check|ci|lint|tests?|benchmark|evals?)\b/i },
+  { name: 'Builds', type: /build|implement|resolver/i, label: /\b(build|implement|step \d+|feat|fix|write|add|port|refactor|draft)\b/i },
+  { name: 'Research', type: /explore|plan|guide|fetch|research/i, label: /\b(search|find|survey|list|scan|map|read|investigate|research|compare|assess)\b/i },
+]
+
+export function category(run: Pick<Run, 'type' | 'label'>): string {
+  if (LEADS_A_BUILD.test(run.label)) return 'Builds'
+  return KINDS.find(k => k.type?.test(run.type) || k.label.test(run.label))?.name ?? 'Other'
+}
+
+export type Category = { name: string; running: Shown[]; failed: Shown[]; done: number; stopped: number; stale: number }
+
+// What the section shows, by kind of work (the order of CATEGORY_ORDER, then Other; empty kinds left out): the
+// running runs, oldest first, and the failed ones of the last hour, each on its line; the runs done or
+// stopped in the last hour only as counts. Visibility follows sections(): stale after STALE_AFTER, finished
+// shown for SHOWN_FOR.
+export function categories(runs: readonly Run[], now: number): Category[] {
+  const by = new Map<string, Category>()
+  for (const run of sections(runs, now).flatMap(s => s.runs)) {
+    const name = category(run)
+    const c = by.get(name) ?? { name, running: [], failed: [], done: 0, stopped: 0, stale: 0 }
+    if (run.status === 'running') {
+      c.running.push(run)
+      if (run.isStale) c.stale++
+    }
+    else if (run.status === 'failed') c.failed.push(run)
+    else if (run.status === 'done') c.done++
+    else c.stopped++
+    by.set(name, c)
+  }
+  const order = [...CATEGORY_ORDER, 'Other']
+  return order.flatMap(name => {
+    const c = by.get(name)
+    if (!c) return []
+    c.running.sort((a, b) => a.started - b.started)
+    return [c]
+  })
+}
+
 // 45s, 12m, 1h 05m.
 export function elapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
