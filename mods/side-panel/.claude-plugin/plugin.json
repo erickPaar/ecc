@@ -1,6 +1,6 @@
 {
   "name": "side-panel",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Panes beside the transcript of the sessions you name: status (open pull requests, each new head with a Review button, sections your own command prints, and what runs on a remote host over ssh), aws (time left on an SSO login) and today (merged today, heads waiting for a first review); keys 1-4 switch tabs.",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -37,7 +37,7 @@
     "sections": {
       "type": "string",
       "title": "Sections command",
-      "description": "A command whose output the pane shows below the pull requests: a line starting with ## is a heading; a line starting with ● is shown red, ✓ green, ⠋ blue. Empty shows none.",
+      "description": "A command whose output the pane shows below the pull requests: a line starting with ## is a heading; a line starting with ● is shown red, ✓ green, ⠋ blue, ◆ yellow, · dim. Empty shows none.",
       "default": ""
     },
     "aws_profile": {
@@ -61,7 +61,7 @@
     "remote_sections": {
       "type": "string",
       "title": "Remote sections command",
-      "description": "A command run on the remote host (bash, login shell) whose output shows in the remote section, in the sections format: ## headings; a line starting with ● red, ✓ green, ⠋ blue. Empty shows none.",
+      "description": "A command run on the remote host (bash, login shell) whose output shows in the remote section, in the sections format: ## headings; a line starting with ● red, ✓ green, ⠋ blue, ◆ yellow, · dim. Empty shows none.",
       "default": ""
     },
     "every": {

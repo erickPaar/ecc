@@ -72,7 +72,10 @@ export function state(pull: Pull, asked: readonly Asked[], now: number): 'review
   return asked.some(a => a.key === key(pull) && now - a.at < ASKED_FOR) ? 'asked' : 'new'
 }
 
-// The sections command's output: "## Title" headings, then lines; a leading ●, ✓ or ⠋ sets the tone.
+// The sections command's output: "## Title" headings, then lines; a leading ● (red), ✓ (green), ⠋ (blue), ◆ (yellow)
+// or · (dim) sets the tone.
+const TONES: Record<string, Line['tone']> = { '●': 'red', '✓': 'green', '⠋': 'blue', '◆': 'yellow', '·': 'dim' }
+
 export function lines(output: string): Line[] {
   return output
     .split('\n')
@@ -80,9 +83,15 @@ export function lines(output: string): Line[] {
     .filter(line => line !== '')
     .map(line => {
       if (line.startsWith('## ')) return { kind: 'heading' as const, text: line.slice(3) }
-      const tone = line.startsWith('●') ? 'red' : line.startsWith('✓') ? 'green' : line.startsWith('⠋') ? 'blue' : undefined
+      const tone = TONES[[...line][0] ?? '']
       return { kind: 'text' as const, text: line, ...(tone ? { tone } : {}) } as Line
     })
+}
+
+// How a line's tone is drawn: dim is a style, not a colour.
+export function toneProps(tone: Line['tone']): { color?: 'red' | 'green' | 'blue' | 'yellow'; dimColor?: true } {
+  if (tone === 'dim') return { dimColor: true }
+  return tone ? { color: tone } : {}
 }
 
 export function repos(setting: string): string[] {
