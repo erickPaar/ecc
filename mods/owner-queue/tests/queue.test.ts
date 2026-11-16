@@ -20,6 +20,17 @@ describe('markers', () => {
     expect(marker('<bash-stderr>oq:abc123:n0:0</bash-stderr>')).toBeUndefined()
     expect(marker('oq:abc123:n0:0')).toBeUndefined()
   })
+  test('a marker after the UTF-16 output of a Windows program still counts', () => {
+    // As wsl.exe --terminate printed it through ssh on 16/11: NUL between the letters, CR before the
+    // line ends, and the marker's own line starting with a NUL or a space.
+    const windows = 'T\u0000h\u0000e\u0000 \u0000o\u0000p\u0000.\u0000 \u0000\r\u0000\n\u0000oq:6ubgwu7c:e91pmswacqq3p59f:0'
+    expect(marker(`<bash-stdout>${windows}</bash-stdout><bash-stderr></bash-stderr>`)).toEqual({ id: '6ubgwu7c', nonce: 'e91pmswacqq3p59f', code: 0 })
+    expect(marker('<bash-stdout>T h e   o p e r a t i o n .    \n oq:6ubgwu7c:e91pmswacqq3p59f:0</bash-stdout>')).toEqual({ id: '6ubgwu7c', nonce: 'e91pmswacqq3p59f', code: 0 })
+    expect(marker('<bash-stdout>Done.\r\noq:abc123:n0:3\r\n</bash-stdout>')).toEqual({ id: 'abc123', nonce: 'n0', code: 3 })
+    // The marker still has to be the whole last line.
+    expect(marker('<bash-stdout>\u0000echo oq:abc123:n0:0 printed</bash-stdout>')).toBeUndefined()
+    expect(marker('<bash-stdout>oq:abc123:n0:0\r\nmore\u0000</bash-stdout>')).toBeUndefined()
+  })
   test('a marker without a nonce is no marker', () => {
     expect(marker('<bash-stdout>oq:abc123:0</bash-stdout>')).toBeUndefined()
   })
