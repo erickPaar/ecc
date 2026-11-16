@@ -594,7 +594,7 @@ export const register: Register = (on, options) => {
               <Text bold>{line.text}</Text>
             </Box>
           ) : (
-            <Text key={`l${i}`} color={line.tone} wrap="truncate-end">
+            <Text key={`l${i}`} color={line.tone === 'dim' ? undefined : line.tone} dimColor={line.tone === 'dim'} wrap="truncate-end">
               {line.text}
             </Text>
           ),

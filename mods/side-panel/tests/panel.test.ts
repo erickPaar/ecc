@@ -86,6 +86,14 @@ describe('sections', () => {
       { kind: 'text', text: '✓ 27% used', tone: 'green' },
     ])
   })
+  test('yellow and dim lines; any other first character has no tone', () => {
+    expect(lines('◆ waits on you\n· parked\nplain\n- dash')).toEqual([
+      { kind: 'text', text: '◆ waits on you', tone: 'yellow' },
+      { kind: 'text', text: '· parked', tone: 'dim' },
+      { kind: 'text', text: 'plain' },
+      { kind: 'text', text: '- dash' },
+    ])
+  })
 })
 
 describe('settings', () => {

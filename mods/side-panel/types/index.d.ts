@@ -8,7 +8,7 @@ export type Pull = {
   isReviewed: boolean // a reviewer's comment or review names this head (and the review word, when one is set)
 }
 
-export type Line = { kind: 'heading' | 'text'; text: string; tone?: 'red' | 'green' | 'blue' }
+export type Line = { kind: 'heading' | 'text'; text: string; tone?: 'red' | 'green' | 'blue' | 'yellow' | 'dim' }
 
 export type Asked = { key: string; at: number } // a head queued from the pane (repo#number@sha), and when
 
