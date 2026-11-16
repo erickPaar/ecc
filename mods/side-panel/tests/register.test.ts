@@ -548,7 +548,7 @@ describe('running', () => {
     })
     await start($, 'coordinator')
     const shown = await drawn($)
-    for (const k of ['Running', 'Research', '2 running · 1 done', '⠋ 5m', '"api · ","run a1"', '? stale', '"api · ","run a2"']) expect(shown).toContain(k)
+    for (const k of ['Running', 'Research', '1 running · 1 stale · 1 done', '⠋ 5m', '"api · ","run a1"', '? stale', '"api · ","run a2"']) expect(shown).toContain(k)
     for (const k of ['run a3', 'run a4', 'run a5']) expect(shown).not.toContain(k)
     expect(w.ran.find(argv => argv[0] === 'rm')).toEqual(['rm', '-f', expect.stringMatching(/content--a5\.json$/)])
   })

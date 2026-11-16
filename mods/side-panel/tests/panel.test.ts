@@ -208,6 +208,11 @@ describe('runs', () => {
     expect(category({ type: 'Explore', label: 'where is the dose rule' })).toBe('Research')
     expect(category({ type: 'general-purpose', label: 'survey open worktrees' })).toBe('Research')
     expect(category({ type: 'statusline-setup', label: 'statusline' })).toBe('Other')
+    expect(category({ type: 'general-purpose', label: 'Fix review findings on #228' })).toBe('Builds')
+    expect(category({ type: 'general-purpose', label: 'Add tests for the keys' })).toBe('Builds')
+    expect(category({ type: 'general-purpose', label: 'step 5 mutation run' })).toBe('Checks')
+    expect(category({ type: 'general-purpose', label: 'the address book feature portal' })).toBe('Other')
+    expect(category({ type: 'general-purpose', label: 'is the readme ready? listing, sitemap' })).toBe('Other')
   })
   test('by kind in a fixed order: running and failed by line, done and stopped as counts', () => {
     const got = categories([

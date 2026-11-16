@@ -339,9 +339,10 @@ async function todayView($: Engine, ui: ReturnType<Engine['ui']['resolve']>) {
 // Each kind of work's heading colour in the Running section.
 const CATEGORY_COLOR: Record<string, 'magenta' | 'cyan' | 'yellow' | 'blue'> = { Reviews: 'magenta', Builds: 'cyan', Checks: 'yellow', Research: 'blue' }
 
-// "2 running · 3 done · 1 failed · 1 stopped", the last hour's, leaving out the zeros.
+// "2 running · 1 stale · 3 done · 1 failed · 1 stopped", the last hour's, leaving out the zeros; a stale run is
+// counted as stale, not running.
 function categoryCounts(c: ReturnType<typeof categories>[number]): string {
-  const parts = [[c.running.length, 'running'], [c.done, 'done'], [c.failed.length, 'failed'], [c.stopped, 'stopped']] as const
+  const parts = [[c.running.length - c.stale, 'running'], [c.stale, 'stale'], [c.done, 'done'], [c.failed.length, 'failed'], [c.stopped, 'stopped']] as const
   return parts.filter(([n]) => n > 0).map(([n, word]) => `${n} ${word}`).join(' · ')
 }
 
