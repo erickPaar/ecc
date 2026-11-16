@@ -77,6 +77,45 @@ export function sections(runs: readonly Run[], now: number): { session: string; 
     }))
 }
 
+// The kinds of work the Running section groups runs by, in the order it shows them, each told from the run's
+// agent type and its label (the description its session gave). The first that matches wins.
+export const CATEGORIES = [
+  { name: 'Reviews', test: (type: string, label: string) => /review|verif/i.test(type) || /\b(review|revis|delta|re-?check|verify|verif|audit|grade)/i.test(label) },
+  { name: 'Builds', test: (type: string, label: string) => /build|implement|fix|resolver/i.test(type) || /\b(build|implement|step \d|feat|fix|write|add|port|refactor|draft)/i.test(label) },
+  { name: 'Checks', test: (_type: string, label: string) => /\b(mutat|make check|ci\b|lint|tests?\b|benchmark|eval)/i.test(label) },
+  { name: 'Research', test: (type: string, label: string) => /explore|plan|guide|fetch|research/i.test(type) || /\b(search|find|survey|list|scan|map|read|investigat|research|compare|assess)/i.test(label) },
+] as const
+
+export function category(run: Pick<Run, 'type' | 'label'>): string {
+  return CATEGORIES.find(c => c.test(run.type, run.label))?.name ?? 'Other'
+}
+
+export type Category = { name: string; running: Shown[]; failed: Shown[]; done: number; stopped: number }
+
+// What the section shows, by kind of work (the order of CATEGORIES, then Other; empty kinds left out): the
+// running runs, oldest first, and the failed ones of the last hour, each on its line; the runs done or
+// stopped in the last hour only as counts. Visibility follows sections(): stale after STALE_AFTER, finished
+// shown for SHOWN_FOR.
+export function categories(runs: readonly Run[], now: number): Category[] {
+  const by = new Map<string, Category>()
+  for (const run of sections(runs, now).flatMap(s => s.runs)) {
+    const name = category(run)
+    const c = by.get(name) ?? { name, running: [], failed: [], done: 0, stopped: 0 }
+    if (run.status === 'running') c.running.push(run)
+    else if (run.status === 'failed') c.failed.push(run)
+    else if (run.status === 'done') c.done++
+    else c.stopped++
+    by.set(name, c)
+  }
+  const order = [...CATEGORIES.map(c => c.name), 'Other']
+  return order.flatMap(name => {
+    const c = by.get(name)
+    if (!c) return []
+    c.running.sort((a, b) => a.started - b.started)
+    return [c]
+  })
+}
+
 // 45s, 12m, 1h 05m.
 export function elapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))

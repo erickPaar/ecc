@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { elapsed, fileName, fromAgent, isOld, label, parse, sections } from '../hooks/runs'
+import { categories, category, elapsed, fileName, fromAgent, isOld, label, parse, sections } from '../hooks/runs'
 
 import { awsProfile, left, lines, logins, merged, names, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today, toneProps } from '../hooks/panel'
 
@@ -199,6 +199,32 @@ describe('runs', () => {
     const got = sections([run({ session: 'b' }), run({ session: 'a', id: 'x', started: NOW - 1000 }), run({ session: 'a', id: 'y', started: NOW - 5000 }), run({ session: 'a', id: 'f1', status: 'done', finished: NOW - 9000 }), run({ session: 'a', id: 'f2', status: 'stopped', finished: NOW - 1000 })], NOW)
     expect(got.map(g => g.session)).toEqual(['a', 'b'])
     expect(got[0]!.runs.map(r => r.id)).toEqual(['y', 'x', 'f2', 'f1'])
+  })
+  test('a run\'s kind of work, from its type and label', () => {
+    expect(category({ type: 'independent-reviewer', label: 'Review pet-intelligence #248 step 5' })).toBe('Reviews')
+    expect(category({ type: 'general-purpose', label: 'Delta review #228 fixes' })).toBe('Reviews')
+    expect(category({ type: 'general-purpose', label: '#221 step 5: agent identity, app pool only' })).toBe('Builds')
+    expect(category({ type: 'general-purpose', label: 'mutation run on keys.py' })).toBe('Checks')
+    expect(category({ type: 'Explore', label: 'where is the dose rule' })).toBe('Research')
+    expect(category({ type: 'general-purpose', label: 'survey open worktrees' })).toBe('Research')
+    expect(category({ type: 'statusline-setup', label: 'statusline' })).toBe('Other')
+  })
+  test('by kind in a fixed order: running and failed by line, done and stopped as counts', () => {
+    const got = categories([
+      run({ id: 'b1', type: 'general-purpose', label: 'step 3 build', started: NOW - 1000 }),
+      run({ id: 'r1', type: 'independent-reviewer', label: 'Review x', started: NOW - 2000 }),
+      run({ id: 'r0', type: 'independent-reviewer', label: 'Review y', started: NOW - 9000 }),
+      run({ id: 'r2', type: 'independent-reviewer', label: 'Review z', status: 'done', finished: NOW - 1000 }),
+      run({ id: 'r3', type: 'independent-reviewer', label: 'Review w', status: 'failed', finished: NOW - 1000 }),
+      run({ id: 'r4', type: 'independent-reviewer', label: 'Review v', status: 'stopped', finished: NOW - 1000 }),
+      run({ id: 'o1', type: 'statusline-setup', label: 'statusline', status: 'done', finished: NOW - 1000 }),
+      run({ id: 'old', type: 'independent-reviewer', label: 'Review old', status: 'done', finished: NOW - 61 * 60_000 }),
+    ], NOW)
+    expect(got.map(c => c.name)).toEqual(['Reviews', 'Builds', 'Other'])
+    expect(got[0]).toMatchObject({ done: 1, stopped: 1 })
+    expect(got[0]!.running.map(r => r.id)).toEqual(['r0', 'r1'])
+    expect(got[0]!.failed.map(r => r.id)).toEqual(['r3'])
+    expect(got[2]).toMatchObject({ done: 1, running: [] })
   })
   test('elapsed', () => {
     expect([elapsed(45_000), elapsed(12 * 60_000), elapsed(65 * 60_000)]).toEqual(['45s', '12m', '1h 05m'])
