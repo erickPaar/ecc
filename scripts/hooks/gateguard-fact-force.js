@@ -203,6 +203,22 @@ function explodeSubshells(input) {
 }
 
 /**
+ * Rewrite the redirection spellings that contain a separator character
+ * (`&>`, `&>>`, `>&file`, `>|`) to a plain `>`, so splitting a command at
+ * `&` and `|` doesn't cut the redirect from its command. fd duplication
+ * (`2>&1`, `>&2`, `>&-`) is left alone.
+ *
+ * @param {string} input
+ * @returns {string}
+ */
+function normalizeRedirects(input) {
+  return String(input || '')
+    .replace(/&>>?/g, '>')
+    .replace(/(^|[^\d>])>&(?=[^\s\d&-])/g, '$1>')
+    .replace(/>\|/g, '>');
+}
+
+/**
  * Split a command line into top-level segments at unquoted shell
  * separators (`;`, `|`, `&`, `&&`, `||`) and across subshells
  * (`$(...)` / backticks). Quoted strings are stripped first so
@@ -213,7 +229,7 @@ function explodeSubshells(input) {
  * @returns {string[]}
  */
 function splitCommandSegments(input) {
-  const stripped = explodeSubshells(stripQuotedStrings(input));
+  const stripped = explodeSubshells(stripQuotedStrings(normalizeRedirects(input)));
   return stripped
     .split(/[;|&]+/)
     .map(segment => segment.replace(/(^|\s)#.*/, '$1').trim())
@@ -336,7 +352,7 @@ function quoteAwareSegments(input) {
     timeTokens = new Set();
   };
 
-  const source = String(input || '');
+  const source = normalizeRedirects(input);
   for (let i = 0; i < source.length; i += 1) {
     const ch = source[i];
     if (escaped) {
@@ -967,17 +983,41 @@ function pushTargetsSharedBranch(rest) {
 }
 
 /**
+ * True when the tokens redirect stdout (`>`, `>>`, `>|`, `1>`) into a
+ * file other than /dev/null. Stderr (`2>`) and fd duplication (`>&2`)
+ * don't count.
+ *
+ * @param {string[]} tokens
+ * @returns {boolean}
+ */
+function redirectsStdoutToFile(tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    const m = /(\d*)>>?\|?([^>]*)$/.exec(tokens[i]);
+    if (!m) continue;
+    if (m[1] !== '' && m[1] !== '1') continue;
+    const target = m[2] !== '' ? m[2] : tokens[i + 1] || '';
+    // `>&2` reaches here as a bare `>`: segments are split at `&`.
+    if (target === '' || target.startsWith('&')) continue;
+    if (target === '/dev/null') continue;
+    return true;
+  }
+  return false;
+}
+
+/**
  * Detect destructive `git` invocations: `reset --hard`, `checkout --`,
  * `clean -f...`, `push --force` (`--force-with-lease` only to a shared
  * branch), `commit --amend`, `rm -rf`, `branch -D`, `stash drop` /
- * `stash clear`, `reflog expire` / `reflog delete`, `update-ref -d`,
- * and `restore` against the worktree.
+ * `stash clear`, `reflog expire` / `reflog delete`, any `update-ref`,
+ * `symbolic-ref` writes to HEAD, `replace`, `show <ref>:<path>` /
+ * `cat-file` redirected into a file, and `restore` against the worktree.
  *
  * @param {string[]} tokens
  * @returns {boolean}
  */
 function isDestructiveGit(tokens) {
-  const sub = findGitSubcommand(tokens);
+  // `GIT_DIR=x git ...`, `env -i git ...` and `sudo git ...` run the same git.
+  const sub = findGitSubcommand(unwrapLeadWrappers(tokens, true, true));
   if (!sub) return false;
   const { command, rest } = sub;
 
@@ -1102,8 +1142,47 @@ function isDestructiveGit(tokens) {
   }
 
   if (command === 'update-ref') {
-    // `git update-ref -d <ref>` deletes a ref directly.
-    return rest.includes('-d') || rest.includes('--delete');
+    // Every `git update-ref` writes or deletes a ref, and it moves a
+    // branch (dropping commits) exactly as `reset --hard` or `commit
+    // --amend` do. Whether the target ref already exists can't be told
+    // from the command text without running git, so all forms are gated:
+    // `<ref> <sha>`, `-d`, and `--stdin`.
+    return true;
+  }
+
+  if (command === 'symbolic-ref') {
+    // Reading (`symbolic-ref HEAD`, `--short HEAD`) takes one name.
+    // Writing HEAD (`symbolic-ref HEAD refs/heads/x`) or deleting it
+    // switches the branch without touching the working tree checks.
+    const positional = [];
+    for (let i = 0; i < rest.length; i++) {
+      const t = rest[i];
+      if (t === '-m') { i += 1; continue; }
+      if (t === '-d' || t === '--delete') return true;
+      if (t.startsWith('-')) continue;
+      positional.push(t);
+    }
+    return positional.length >= 2 && positional[0] === 'HEAD';
+  }
+
+  if (command === 'replace') {
+    // `git replace` rewrites what an object name resolves to. Only the
+    // listing forms (no arguments, `-l`, `--list`, `--format`) are free.
+    if (rest.some(t => t === '-l' || t === '--list' || t.startsWith('--format'))) return false;
+    return rest.length > 0;
+  }
+
+  if (command === 'show' || command === 'cat-file') {
+    // `git show <ref>:<path> > file` and `git cat-file -p <obj> > file`
+    // overwrite a working file with old content, as `checkout <ref> --`
+    // does. A redirect into a path is visible in the text; a path other
+    // than /dev/null is gated whether or not it is tracked, because
+    // tracking can't be told without running git. `show` needs a
+    // `<ref>:<path>` argument; `cat-file` any object.
+    // Not covered: `| tee f`, `cp`, `2>&1 > file` (segments split at `&`),
+    // or a redirect set up by `exec`.
+    if (command === 'show' && !rest.some(t => !t.startsWith('-') && t.includes(':'))) return false;
+    return redirectsStdoutToFile(rest);
   }
 
   if (command === 'restore') {

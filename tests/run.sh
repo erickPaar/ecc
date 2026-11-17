@@ -42,6 +42,43 @@ check "gateguard: routine command passes"     allow "$(gate 'ls -la' s2)"
 reason=$(bash_input 'rm -rf dist' s3 | "$ROOT/bin/node-run" "$ROOT/bin/run-hook.js" "$ROOT/scripts/hooks/gateguard-fact-force.js" | jq -r .hookSpecificOutput.permissionDecisionReason)
 check "gateguard: asks for the exact same retry" yes "$([[ $reason == *"exact same command"* ]] && echo yes || echo no)"
 
+# Plumbing that moves a ref or overwrites a file is held like its porcelain twin. Each call is a
+# fresh session, and the hold is told from the first-command prompt by the word "Destructive".
+gated() { local r; r=$(bash_input "$1" "g-$BASHPID-$RANDOM" | "$ROOT/bin/node-run" "$ROOT/bin/run-hook.js" "$ROOT/scripts/hooks/gateguard-fact-force.js" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""'); [[ $r == *Destructive* ]] && echo gated || echo free; }
+check "gateguard: update-ref moves a branch"                gated "$(gated 'git update-ref refs/heads/work abc123')"
+check "gateguard: update-ref of a new-looking ref"          gated "$(gated 'git update-ref refs/tags/v1 abc123')"
+check "gateguard: update-ref --stdin"                       gated "$(gated 'git update-ref --stdin')"
+check "gateguard: update-ref -d"                            gated "$(gated 'git update-ref -d refs/heads/work')"
+check "gateguard: symbolic-ref writes HEAD"                 gated "$(gated 'git symbolic-ref HEAD refs/heads/other')"
+check "gateguard: symbolic-ref reads HEAD"                  free  "$(gated 'git symbolic-ref --short HEAD')"
+check "gateguard: replace creates a replacement"            gated "$(gated 'git replace abc123 def456')"
+check "gateguard: replace --list"                           free  "$(gated 'git replace --list')"
+check "gateguard: show ref:path redirected"                 gated "$(gated 'git show HEAD~1:src/a.txt > src/a.txt')"
+check "gateguard: show ref:path appended"                   gated "$(gated 'git show HEAD:a.txt >> a.txt')"
+check "gateguard: show ref:path with no space"              gated "$(gated 'git show HEAD:a.txt>a.txt')"
+check "gateguard: cat-file -p redirected"                   gated "$(gated 'git cat-file -p abc123 > a.txt')"
+check "gateguard: show ref:path to a pipe"                  free  "$(gated 'git show HEAD:a.txt | head')"
+check "gateguard: show ref:path to /dev/null"               free  "$(gated 'git show HEAD:a.txt > /dev/null')"
+check "gateguard: show a commit redirected"                 free  "$(gated 'git show HEAD > out.patch')"
+check "gateguard: symbolic-ref -d HEAD"                     gated "$(gated 'git symbolic-ref -d HEAD')"
+check "gateguard: symbolic-ref with a reason"               gated "$(gated 'git symbolic-ref -m switch HEAD refs/heads/other')"
+check "gateguard: symbolic-ref of a remote HEAD"            free  "$(gated 'git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main')"
+check "gateguard: replace --list with a pattern"            free  "$(gated 'git replace --list abc*')"
+check "gateguard: show ref:path with stderr to a file"      free  "$(gated 'git show HEAD:a.txt 2> err.log')"
+check "gateguard: show ref:path to a duplicated fd"         free  "$(gated 'git show HEAD:a.txt >&2')"
+check "gateguard: show ref:path to &> file"                 gated "$(gated 'git show HEAD:a.md &> a.md')"
+check "gateguard: show ref:path to &>> file"                gated "$(gated 'git show HEAD:a.md &>> a.md')"
+check "gateguard: show ref:path to >&file"                  gated "$(gated 'git show HEAD:a.md >&a.md')"
+check "gateguard: show ref:path to >| file"                 gated "$(gated 'git show HEAD:a.md >| a.md')"
+check "gateguard: show ref:path to >&2 stays free"          free  "$(gated 'git show HEAD:a.md >&2')"
+check "gateguard: show ref:path 2>&1 stays free"            free  "$(gated 'git show HEAD:a.md 2>&1')"
+check "gateguard: VAR=val before update-ref"                gated "$(gated 'GIT_DIR=x git update-ref refs/heads/w abc')"
+check "gateguard: VAR=val before reset --hard"              gated "$(gated 'GIT_DIR=x git reset --hard')"
+check "gateguard: env -i before update-ref"                 gated "$(gated 'env -i git update-ref refs/heads/w abc')"
+check "gateguard: env VAR=val before reset --hard"          gated "$(gated 'env GIT_DIR=x git reset --hard')"
+check "gateguard: VAR=val before a read-only git"           free  "$(gated 'GIT_DIR=x git status')"
+check "gateguard: commit-tree writes only an object"        free  "$(gated 'git commit-tree abc123 -m x')"
+
 # An rm inside the session's own scratchpad passes; the input is a subagent's, which carries the
 # session's scratchpad_dir. The cwd it carries is never trusted: a relative path needs a cd first.
 PADS=$(cd "$(mktemp -d)" && pwd -P); SP=$PADS/pad/scratchpad; OTHER=$PADS/other/scratchpad; OUT=$(mktemp -d)
