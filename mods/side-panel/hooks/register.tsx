@@ -10,7 +10,7 @@ import type { Engine, Register } from 'claude-code'
 import type { Asked, Aws, Board, Pull, Remote, Run, Today } from '../types'
 import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today, toneProps } from './panel'
 import { readAnswer, REMOTE_WAIT_S, remoteArgv, remoteError, remoteHost, remoteScript } from './remote'
-import { BEAT_EVERY, categories, elapsed, fileName, fromAgent, isOld, label, parse, sections as runSections } from './runs'
+import { BEAT_EVERY, categories, elapsed, endedBy, endedUnseen, fileName, isOld, label, parse, sections as runSections, settledCounts } from './runs'
 
 const PANE = 'side-panel'
 const AWS_PANE = 'side-panel-aws'
@@ -30,7 +30,7 @@ let me: string | undefined
 let isTicking = false
 const runsAtom = atom({ plugin: 'side-panel', key: 'runs' } as const, [] as Run[])
 // The writer: this session's own runs, and the effort each Agent call asked for, by tool_use_id.
-const mine = { dir: '', session: '', runs: new Map<string, Run>(), efforts: new Map<string, string>(), beat: undefined as { cancel: () => void } | undefined }
+const mine = { dir: '', session: '', sid: '', runs: new Map<string, Run>(), efforts: new Map<string, string>(), beat: undefined as { cancel: () => void } | undefined }
 
 async function runsDir($: Engine): Promise<string> {
   return `${(await $.env.get('HOME')) ?? '/tmp'}/.local/state/side-panel/runs`
@@ -65,7 +65,7 @@ async function beat($: Engine): Promise<void> {
     }
     for (const run of [...mine.runs.values()]) {
       const agent = listed?.find(a => a.id === run.id)
-      const ended = agent !== undefined ? fromAgent(agent.status) : listed !== undefined && now - run.started >= BEAT_EVERY ? 'stopped' : undefined
+      const ended = agent !== undefined ? endedBy(agent.status, run.type) : listed !== undefined && now - run.started >= BEAT_EVERY ? endedUnseen(run.type) : undefined
       await writeRun($, ended !== undefined ? { ...run, status: ended, finished: now } : { ...run, beat: now })
     }
   } catch {
@@ -83,6 +83,42 @@ async function finish($: Engine, id: string, status: Run['status']): Promise<voi
   const run = mine.runs.get(id)
   if (run === undefined || run.status !== 'running') return
   await writeRun($, { ...run, status, finished: await $.clock.now() })
+}
+
+// This session's name for its runs, and its id; set on the first run or the first load.
+async function identify($: Engine): Promise<void> {
+  if (mine.dir === '') mine.dir = await runsDir($)
+  if (mine.session === '') mine.session = (await read($, title)) || (await $.env.get('CZW_SESSION')) || (await $.session.cwd()).split('/').pop() || 'session'
+  if (mine.sid === '') {
+    try {
+      mine.sid = await $.session.id()
+    } catch {
+      mine.sid = ''
+    }
+  }
+}
+
+// After a reload the module's own variables start over, so the runs this session started and has
+// not settled are read back from their files and beaten or settled again. Only a running run of this
+// session's own name (and id, when both say one) is taken.
+async function adopt($: Engine): Promise<void> {
+  try {
+    await identify($)
+    if (!(await $.fs.exists(mine.dir))) return
+    for (const entry of await $.fs.list(mine.dir)) {
+      if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+      const one = parse(String(await $.fs.read(`${mine.dir}/${entry.name}`)))
+      if (one === undefined || one.status !== 'running' || one.session !== mine.session) continue
+      if (one.sid !== undefined && mine.sid !== '' && one.sid !== mine.sid) continue
+      if (!mine.runs.has(one.id)) mine.runs.set(one.id, one)
+    }
+    if (mine.runs.size > 0 && mine.beat === undefined) {
+      mine.beat = $.clock.every(BEAT_EVERY, () => void beat($))
+      void beat($)
+    }
+  } catch {
+    // The panel shows them stale until the next load.
+  }
 }
 
 // Every session's runs, for the Running section; files a day old are deleted.
@@ -364,6 +400,16 @@ function runLine(ui: ReturnType<Engine['ui']['resolve']>, r: ReturnType<typeof r
   )
 }
 
+// A session's runs on the remote machine: the running and failed ones on a line each, the rest only counted.
+function runRows(ui: ReturnType<Engine['ui']['resolve']>, runs: ReturnType<typeof runSections>[number]['runs'], at: number, keyPrefix: string) {
+  const { Text } = ui
+  const counts = settledCounts(runs)
+  return [
+    ...runs.filter(r => r.status === 'running' || r.status === 'failed').map(r => runLine(ui, r, at, '    ', keyPrefix)),
+    ...(counts !== '' ? [<Text key={`${keyPrefix}-counts`} dimColor wrap="truncate-end">{`    ${counts}`}</Text>] : []),
+  ]
+}
+
 // The remote section: its sessions, each with its subagent runs beneath, the runs of sessions not
 // listed, then the remote command's lines; or, red, why the machine could not be read.
 async function remoteView($: Engine, ui: ReturnType<Engine['ui']['resolve']>, at: number) {
@@ -393,13 +439,13 @@ async function remoteView($: Engine, ui: ReturnType<Engine['ui']['resolve']>, at
             {s.kind && s.kind !== 'interactive' ? ` · ${s.kind}` : ''}
             {s.started ? ` · ${elapsed(at - s.started)}` : ''}
           </Text>
-          {(groups.find(g => g.session === s.name)?.runs ?? []).map(r => runLine(ui, r, at, '    ', 'rr'))}
+          {runRows(ui, groups.find(g => g.session === s.name)?.runs ?? [], at, 'rr')}
         </Box>
       ))}
       {orphans.map(group => (
         <Box key={`ro-${group.session}`} flexDirection="column">
           <Text color="blue">{group.session}</Text>
-          {group.runs.map(r => runLine(ui, r, at, '    ', 'ro'))}
+          {runRows(ui, group.runs, at, 'ro')}
         </Box>
       ))}
       {there.lines.map((line, i) =>
@@ -452,14 +498,14 @@ export const register: Register = (on, options) => {
     if (id === undefined) return started
     // The spawn's answer stands whatever happens to its file.
     try {
-      if (mine.dir === '') mine.dir = await runsDir($)
-      if (mine.session === '') mine.session = (await read($, title)) || (await $.env.get('CZW_SESSION')) || (await $.session.cwd()).split('/').pop() || 'session'
+      await identify($)
       const now = await $.clock.now()
       const effort = mine.efforts.get(e.tool_use_id)
       mine.efforts.delete(e.tool_use_id)
       await run($, ['mkdir', '-p', mine.dir])
       await writeRun($, {
         session: mine.session,
+        ...(mine.sid !== '' ? { sid: mine.sid } : {}),
         id,
         label: label(e.description),
         type: e.subagentType || 'general-purpose',
@@ -488,6 +534,7 @@ export const register: Register = (on, options) => {
   })
 
   on('session.start', async ($, e, next) => {
+    await adopt($)
     await $.command.register({ name: 'panel', description: 'Show the side panel: pull requests and your sections' })
     // CZW_SESSION reaches a headless claude -p started from this session too: only a session a
     // person is at reads and shows.

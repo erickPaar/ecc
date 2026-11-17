@@ -7,7 +7,7 @@ const DIR = '/q'
 const OPTIONS = { dir: DIR, pane: 'off' }
 const AUTO = { dir: DIR, pane: 'auto' }
 
-type World = { files: Map<string, string>; copied: string[]; opened: string[]; ran: string[][]; checked: string[] }
+type World = { files: Map<string, string>; copied: string[]; opened: string[]; ran: string[][]; checked: string[]; toasts: string[] }
 type Setup = { cwdFails?: boolean; isFull?: boolean; isPlaced?: boolean; branch?: string; origin?: string; config?: Record<string, string>; env?: Record<string, string>; taken?: number }
 
 // A folder in memory beneath the plugin: what $.fs and $.process.run reach in a session, and the
@@ -20,6 +20,7 @@ function world(on: On, { cwdFails = false, isFull = false, isPlaced = false, bra
   const checked: string[] = []
   const copied: string[] = []
   const opened: string[] = []
+  const toasts: string[] = []
   on('fs.exists', (_$, e) => {
     if (e.path.endsWith('.json')) checked.push(e.path)
     if (e.path.endsWith('.json') && checked.length <= taken) return { value: true }
@@ -55,7 +56,10 @@ function world(on: On, { cwdFails = false, isFull = false, isPlaced = false, bra
   on('classic.SessionStart', () => ({}) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
   on('tool.register', (_$, e) => ({ value: e }) as never)
-  on('ui.toast', () => ({ value: undefined }) as never)
+  on('ui.toast', (_$, e) => {
+    toasts.push(String((e as { text?: string }).text ?? ''))
+    return { value: undefined } as never
+  })
   on('ui.copy', (_$, e) => {
     copied.push(e.text)
     return { value: { isCopied: true } } as never
@@ -66,11 +70,11 @@ function world(on: On, { cwdFails = false, isFull = false, isPlaced = false, bra
     opened.push(e.id)
     return { value: { isPlaced } } as never
   })
-  return { files, copied, opened, ran, checked }
+  return { files, copied, opened, ran, checked, toasts }
 }
 
 function queued(w: World): Item[] {
-  return [...w.files.values()].map(text => JSON.parse(text) as Item).sort((a, b) => a.created - b.created)
+  return [...w.files.entries()].filter(([path]) => path.startsWith(`${DIR}/`)).map(([, text]) => JSON.parse(text) as Item).sort((a, b) => a.created - b.created)
 }
 
 // The queue's item at this place, oldest first; a test that finds none fails.
@@ -1122,5 +1126,136 @@ describe('review fixes', () => {
     expect(nth(w).status).toBe('waiting')
     await $.ui.press({ plugin: 'owner-queue', key: `remove-${item.id}` })
     expect(nth(w).status).toBe('removed')
+  })
+})
+
+// What the owner sees and the queue keeps while a ! run goes on, and how its end is found wherever it prints.
+const BG = '<bash-stdout>Command running in background with ID: bx1. Output is being written to: /tmp/tasks/bx1.output</bash-stdout><bash-stderr></bash-stderr>'
+function notification(id: string, file: string, status: string) {
+  return `<task-notification><task-id>${id}</task-id><output-file>${file}</output-file><status>${status}</status><summary>Background command finished</summary></task-notification>`
+}
+async function begin($: Dollar, w: World, command = 'make test') {
+  await ask($, command)
+  const item = nth(w)
+  const nonce = await copy($, w, item.id)
+  await row($, `<bash-input>${w.copied[w.copied.length - 1]}</bash-input>`)
+  return { item, nonce }
+}
+
+describe('a run the owner started', () => {
+  test('shows as running with its start time, and is no longer next', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await begin($, w)
+    expect(nth(w).startedAt).toBe(5000)
+    const drawn = await pane($)
+    expect(drawn).toMatch(/running since \d\d:\d\d/)
+    expect(drawn).not.toContain('"next"')
+    expect(drawn).not.toContain('· next')
+    expect(drawn).toContain('1 running')
+    expect(await $.tool.call({ tool: 'mcp__owner-queue__owner_queue_list' } as never)).toMatchObject({ result: expect.stringContaining('running') })
+  })
+
+  test('a second start is refused: Copy says since when, the repeated row changes nothing, the model\'s run is held', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { item } = await begin($, w)
+    const first = w.copied.length
+    await clock.advance(4 * 60_000)
+    await pane($)
+    await $.ui.press({ plugin: 'owner-queue', key: `copy-${item.id}` })
+    expect(w.copied.length).toBe(first)
+    expect(w.toasts.some(t => /already running since \d\d:\d\d/i.test(t))).toBe(true)
+    w.toasts.length = 0
+    await row($, `<bash-input>${w.copied[0]}</bash-input>`)
+    expect(nth(w).startedAt).toBe(5000)
+    expect(w.toasts.some(t => /already running since/i.test(t))).toBe(true)
+    const denied = await $.tool.call({ tool: 'Bash', command: 'make test' } as never)
+    expect(JSON.stringify(denied)).toContain('Already running since')
+  })
+
+  test('its end is seen from the foreground', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { item, nonce } = await begin($, w)
+    await row($, `<bash-stdout>ok\noq:${item.id}:${nonce}:0</bash-stdout><bash-stderr></bash-stderr>`)
+    expect(nth(w)).toMatchObject({ status: 'done' })
+    expect(nth(w).startedAt).toBeUndefined()
+  })
+
+  test('its end is seen from a background task\'s completion, read from the output file', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { item, nonce } = await begin($, w)
+    await row($, BG)
+    expect(nth(w).status).toBe('waiting')
+    expect(nth(w).running).toBeDefined()
+    w.files.set('/tmp/tasks/bx1.output', `tests ok\noq:${item.id}:${nonce}:0\n`)
+    await row($, notification('bx1', '/tmp/tasks/bx1.output', 'completed'), { door: 'delivery', origin: 'task-notification' })
+    expect(nth(w)).toMatchObject({ status: 'done' })
+    expect(nth(w).running).toBeUndefined()
+  })
+
+  test('a background end with a failing code fails the item; wording of the first row does not matter', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { item, nonce } = await begin($, w)
+    await row($, '<bash-stdout>Moved to a task</bash-stdout>')
+    w.files.set('/tmp/tasks/zz.output', `boom\noq:${item.id}:${nonce}:3\n`)
+    await row($, notification('zz', '/tmp/tasks/zz.output', 'failed'), { door: 'delivery', origin: 'task-notification' })
+    expect(nth(w)).toMatchObject({ status: 'failed', code: 3 })
+  })
+
+  test('a notification from anyone but the engine, or with another item\'s nonce, settles nothing', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { item } = await begin($, w)
+    await row($, BG)
+    w.files.set('/tmp/tasks/bx1.output', `oq:${item.id}:wrongnonce:0\n`)
+    await row($, notification('bx1', '/tmp/tasks/bx1.output', 'completed'), { door: 'delivery', origin: 'task-notification' })
+    expect(nth(w).status).toBe('waiting')
+    expect(nth(w).running).toBeDefined()
+    w.files.set('/tmp/tasks/bx1.output', `oq:${item.id}:${nth(w).running}:0\n`)
+    await row($, notification('bx1', '/tmp/tasks/bx1.output', 'completed'), { door: 'delivery', origin: 'peer' })
+    expect(nth(w).status).toBe('waiting')
+  })
+
+  test('a stopped task with no marker fails the item instead of leaving it running', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await begin($, w)
+    await row($, BG)
+    w.files.set('/tmp/tasks/bx1.output', 'partial output\n')
+    await row($, notification('bx1', '/tmp/tasks/bx1.output', 'killed'), { door: 'delivery', origin: 'task-notification' })
+    expect(nth(w)).toMatchObject({ status: 'failed', code: -1 })
+    expect(nth(w).running).toBeUndefined()
+  })
+
+  test('the session ending with the run unseen fails it', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    on('session.end', (_$, e) => e as never)
+    await start($)
+    await begin($, w)
+    await $.session.end({ reason: 'other', sessionId: 's' } as never)
+    expect(nth(w)).toMatchObject({ status: 'failed', code: -1 })
+  })
+
+  test('a run nobody settled for a day is failed, so nothing stays running forever', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await begin($, w)
+    const [path] = [...w.files.keys()]
+    w.files.set(path!, JSON.stringify({ ...nth(w), startedAt: 5000 - 25 * 3_600_000 }))
+    await clock.advance(3000)
+    expect(nth(w)).toMatchObject({ status: 'failed', code: -1 })
   })
 })

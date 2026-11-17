@@ -47,6 +47,28 @@ export function fromAgent(status: string): Run['status'] | undefined {
   return undefined
 }
 
+// How a running run ends by what the agent list says of its agent. An agent that is idle has
+// finished its turn and waits for a message that may never come: its work is done (a teammate
+// idles between tasks and keeps running).
+export function endedBy(status: string, type: string): Run['status'] | undefined {
+  if (status === 'idle' && type !== 'teammate') return 'done'
+  return fromAgent(status)
+}
+
+// How a run ends when the agent list no longer holds its agent and nothing else said how: stopped,
+// outcome unknown. A workflow's agents never send a stop event and are dropped from the list once they
+// finish, so theirs is taken as done, not as stopped.
+export function endedUnseen(type: string): Run['status'] {
+  return type === 'workflow-subagent' ? 'done' : 'stopped'
+}
+
+// How many runs ended otherwise than running or failed, as "2 done · 1 stopped".
+export function settledCounts(runs: readonly Run[]): string {
+  const done = runs.filter(r => r.status === 'done').length
+  const stopped = runs.filter(r => r.status === 'stopped').length
+  return [done > 0 ? `${done} done` : undefined, stopped > 0 ? `${stopped} stopped` : undefined].filter(part => part !== undefined).join(' · ')
+}
+
 // Whether a run file is old enough to delete: finished, or last marked alive, a day ago.
 export function isOld(run: Run, now: number): boolean {
   return now - (run.finished ?? run.beat ?? run.started) > KEPT_FOR

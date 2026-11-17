@@ -21,6 +21,10 @@ export type Item = {
   noted?: boolean // the asking session has been told it failed
   nonce?: string // made at the last Copy, spent by the tick; only a marker carrying it ticks
   running?: string // the nonce of a ! run that started: only that run's own output can tick it
+  startedAt?: number // when that run started: the pane shows it, and a second start is refused while it is set
+  runSession?: string // the session whose ! started it: its end settles a run that never reported
+  taskId?: string // the background task the ! run moved to, when its first output named one
+  late?: string // the nonce of a run whose output showed no marker: a background task's end may still carry it
   created: number
   updated: number
 }

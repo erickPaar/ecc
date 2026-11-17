@@ -11,8 +11,8 @@ import { onlyReads, pushDirs } from './guard'
 import type { Pushable } from './guard'
 import type { Item, Kind } from './queue'
 import {
-  age, blocker, byLine, fold, heldReason, ID, isKind, KIND_LABEL, KINDS, kindOf, listing, marker, newId, newNonce, nextItem, numberOf,
-  openItems, stale, summary, TEXT, visible, waitingFor, who, withMarker,
+  age, backgrounded, blocker, byLine, clockTime, fold, heldReason, ID, isKind, isRunning, KIND_LABEL, KINDS, kindOf, listing, marker, markersIn,
+  newId, newNonce, nextItem, notice, numberOf, openItems, runningFor, stale, summary, TEXT, visible, waitingFor, who, withMarker,
 } from './queue'
 
 const PANE = 'owner-queue'
@@ -23,6 +23,8 @@ const QUEUE_TOOL = `${TOOL}ask_owner_to_run`
 const OWN_TOOLS = new Set([QUEUE_TOOL, `${TOOL}owner_queue_list`, `${TOOL}owner_queue_remove`, `${TOOL}owner_queue_done`])
 // How long Remove waits for its second press.
 const CONFIRM_MS = 5000
+// A ! run that has told the queue nothing for this long is taken as gone.
+const RUN_LIMIT_MS = 24 * 3_600_000
 const items = atom({ plugin: 'owner-queue', key: 'items' } as const, [] as Item[])
 const isPaneShown = atom({ plugin: 'owner-queue', key: 'isPaneShown' } as const, false)
 const title = atom({ plugin: 'owner-queue', key: 'title' } as const, '')
@@ -117,8 +119,52 @@ async function agentName($: Engine, agentId: string): Promise<string> {
 }
 
 async function setStatus($: Engine, item: Item, status: Item['status'], extra: Partial<Item> = {}): Promise<void> {
-  await save($, { ...item, status, ...extra, nonce: undefined, running: undefined, updated: await $.clock.now() }) // a tick spends the nonce
+  await save($, { ...item, status, ...extra, nonce: undefined, running: undefined, late: undefined, taskId: undefined, startedAt: undefined, runSession: undefined, updated: await $.clock.now() }) // a tick spends the nonce
   await refresh($)
+}
+
+// A run the owner started whose end never reached the queue (its task was stopped, its session
+// ended, a day went by) is failed, not left running.
+async function settleUnseen($: Engine, item: Item): Promise<void> {
+  await setStatus($, item, 'failed', { code: -1, note: TEXT.stoppedUnseen })
+}
+
+// Settles the runs a background task's notification reports: by the marker its output file ends
+// with (or the notification carries), which names the item and its nonce; with none, a task that
+// did not complete fails the run it was started for. Only the engine's own notification counts.
+async function settleFromNotification($: Engine, text: string): Promise<void> {
+  const note = notice(text)
+  if (note === undefined) return
+  let body = text
+  if (note.file !== undefined && note.file.startsWith('/')) {
+    try {
+      body += `\n${await $.fs.read(note.file)}`
+    } catch {
+      // The file is gone: the notification's own text is all there is.
+    }
+  }
+  const markers = markersIn(body)
+  const open = (await load($, ctx.dir)).filter(one => one.status === 'waiting' && (one.running !== undefined || one.late !== undefined))
+  let isSettled = false
+  for (const item of open) {
+    const ran = markers.find(one => one.id === item.id && one.nonce === (item.running ?? item.late))
+    if (ran === undefined) continue
+    await setStatus($, item, ran.code === 0 ? 'done' : 'failed', { code: ran.code })
+    isSettled = true
+  }
+  if (isSettled || note.status === 'completed') return
+  // Stopped or failed with no marker: the item of this task, else the only run this session started.
+  const mine = open.filter(one => isRunning(one) && one.runSession === ctx.session)
+  const byTask = mine.filter(one => one.taskId !== undefined && one.taskId === note.task)
+  const found = byTask.length > 0 ? byTask : mine.length === 1 && mine[0]?.taskId === undefined ? mine : []
+  for (const item of found) await settleUnseen($, item)
+  if (found.length > 0) await refresh($)
+}
+
+// Fails the runs nobody settled for a day.
+async function sweepRunning($: Engine, list: readonly Item[]): Promise<void> {
+  const now = await $.clock.now()
+  for (const item of list) if (isRunning(item) && now - (item.startedAt ?? item.updated) > RUN_LIMIT_MS) await settleUnseen($, item)
 }
 
 // Removes an open item or marks it done for a tool call or the pane, recording who and why. Read
@@ -281,7 +327,7 @@ export const register: Register = (on, options) => {
     const now = await refresh($)
     await tellFailures($, now)
     if (ctx.paneMode === 'auto' && visible(now, await $.clock.now()).length > 0) void showPane($)
-    $.clock.every(3000, () => void refresh($).then(list => tellFailures($, list)))
+    $.clock.every(3000, () => void refresh($).then(async list => { await sweepRunning($, list); return tellFailures($, list) }))
     // The ages in the pane move on with the clock, not with the queue.
     $.clock.every(60_000, () => $.ui.invalidate('ui.render'))
     return next(e)
@@ -350,6 +396,8 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as { tool: string; command?: unknown }
     if (OWN_TOOLS.has(input.tool) || typeof input.command !== 'string') return next(e)
+    const going = runningFor(await load($, ctx.dir), input.command)
+    if (going !== undefined) return { deny: TEXT.alreadyRunning(clockTime(going.startedAt ?? going.updated)) }
     const local = await branches($, input.command, repos)
     const what = heldReason(input.command, extra, local.found, local.pushable)
     if (what === undefined) return next(e)
@@ -366,20 +414,54 @@ export const register: Register = (on, options) => {
     if (message.type === 'user' && e.door === 'command' && OWNER_ORIGINS.has(origin)) {
       const text = (message.content ?? []).map(part => part.text ?? '').join('\n')
       if (text.includes('<bash-input>')) {
+        const now = await $.clock.now()
         for (const item of await load($, ctx.dir)) {
+          if (isRunning(item) && item.running !== undefined && text.includes(item.running)) {
+            // The same command pasted again: the first run goes on, and the second cannot be stopped from here.
+            $.ui.toast(TEXT.alreadyRunning(clockTime(item.startedAt ?? item.updated)))
+            continue
+          }
           if (item.nonce === undefined || !text.includes(item.nonce)) continue
-          await save($, { ...item, nonce: undefined, running: item.nonce })
+          await save($, { ...item, nonce: undefined, running: item.nonce, startedAt: now, runSession: ctx.session })
           ctx.started.add(item.id)
         }
+        await refresh($)
       } else if (text.includes('<bash-stdout>')) {
         const ran = marker(text)
         for (const item of await load($, ctx.dir)) {
           const isOwn = ran !== undefined && item.id === ran.id && (item.nonce === ran.nonce || item.running === ran.nonce)
           if (isOwn) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', { code: ran.code })
-          else if (item.running !== undefined && ctx.started.has(item.id)) await save($, { ...item, running: undefined })
+          else if (item.running !== undefined && ctx.started.has(item.id)) {
+            // No marker: the command moved to a background task (its end comes in a notification), or it
+            // ended without one. Either way a marker may still arrive from that task, so the nonce is kept as `late`.
+            const away = backgrounded(text)
+            if (away !== undefined) await save($, { ...item, ...(away.taskId !== undefined ? { taskId: away.taskId } : {}) })
+            else await save($, { ...item, running: undefined, startedAt: undefined, runSession: undefined, late: item.running })
+          }
         }
         ctx.started.clear()
         await refresh($)
+      }
+    }
+    // A background task's end arrives as the engine's own notification, not as the ! command's output.
+    if (origin === 'task-notification') {
+      const text = ((e.message as { content?: readonly { type: string; text?: string }[] }).content ?? []).map(part => part.text ?? '').join('\n')
+      try {
+        await settleFromNotification($, text)
+      } catch {
+        // The sweep or the session's end settles it.
+      }
+    }
+    return next(e)
+  })
+
+  // The session ended: a ! run it started that never reported cannot report now.
+  on('session.end', async ($, e, next) => {
+    if (e.reason !== 'clear') {
+      try {
+        for (const item of await load($, ctx.dir)) if (isRunning(item) && item.runSession === ctx.session) await settleUnseen($, item)
+      } catch {
+        // The sweep settles it.
       }
     }
     return next(e)
@@ -395,7 +477,7 @@ export const register: Register = (on, options) => {
     const confirming = await read($, confirm)
     const whole = new Set(await read($, expanded))
     // d, x and e act on the next item; c copies the first runnable item with a command.
-    const keyedCopy = open.find(one => one.status === 'waiting' && one.command !== '' && blocker(one, all) === undefined)
+    const keyedCopy = open.find(one => one.status === 'waiting' && !isRunning(one) && one.command !== '' && blocker(one, all) === undefined)
 
     // Reads the item again before acting: another session may have finished it since the pane was drawn.
     const fresh = async (id: string): Promise<Item | undefined> => {
@@ -419,8 +501,9 @@ export const register: Register = (on, options) => {
           const isNext = item === next
           const isFinished = item.status === 'done' || item.status === 'removed'
           const isFailed = item.status === 'failed'
-          const state = isNext ? 'cyan' : isFailed ? 'red' : item.status === 'done' ? 'green' : undefined
-          const mark = item.status === 'done' ? '✓' : item.status === 'removed' ? '–' : `${number}`
+          const isGoing = isRunning(item)
+          const state = isGoing ? 'yellow' : isNext ? 'cyan' : isFailed ? 'red' : item.status === 'done' ? 'green' : undefined
+          const mark = item.status === 'done' ? '✓' : item.status === 'removed' ? '–' : isGoing ? '▶' : `${number}`
           const kind = KIND_LABEL[item.kind ?? kindOf(item.command, undefined)]
           const folded = fold(item.command)
           const isWhole = folded.more === 0 || whole.has(item.id)
@@ -430,6 +513,7 @@ export const register: Register = (on, options) => {
             who(item.from, item.agent),
             age(now - (isFinished ? item.updated : item.created)),
             isNext ? TEXT.next : undefined,
+            isGoing ? TEXT.runningNow(clockTime(item.startedAt ?? item.updated)) : undefined,
             first !== undefined ? TEXT.after(numberOf(first, all) ?? first.id) : undefined,
             isFailed ? TEXT.failed(item.code ?? -1) : undefined,
           ].filter(part => part !== undefined)
@@ -470,6 +554,10 @@ export const register: Register = (on, options) => {
                         await update($, confirm, () => '')
                         const current = await fresh(item.id)
                         if (current === undefined) return
+                        if (isRunning(current)) {
+                          $.ui.toast(TEXT.alreadyRunning(clockTime(current.startedAt ?? current.updated)))
+                          return
+                        }
                         // The nonce is in the item before it is on the clipboard, so a quick run ticks.
                         const nonce = newNonce()
                         await save($, { ...current, nonce })
