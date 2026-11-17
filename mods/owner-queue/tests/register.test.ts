@@ -1130,7 +1130,7 @@ describe('review fixes', () => {
 })
 
 // What the owner sees and the queue keeps while a ! run goes on, and how its end is found wherever it prints.
-const BG = '<bash-stdout>Command running in background with ID: bx1. Output is being written to: /tmp/tasks/bx1.output</bash-stdout><bash-stderr></bash-stderr>'
+const BG = '<bash-stdout>Command running in background (ID: bx1). Output is being written to: /tmp/tasks/bx1.output</bash-stdout><bash-stderr></bash-stderr>'
 function notification(id: string, file: string, status: string) {
   return `<task-notification><task-id>${id}</task-id><output-file>${file}</output-file><status>${status}</status><summary>Background command finished</summary></task-notification>`
 }
@@ -1236,6 +1236,65 @@ describe('a run the owner started', () => {
     await row($, notification('bx1', '/tmp/tasks/bx1.output', 'killed'), { door: 'delivery', origin: 'task-notification' })
     expect(nth(w)).toMatchObject({ status: 'failed', code: -1 })
     expect(nth(w).running).toBeUndefined()
+  })
+
+  test('an unrelated task that fails or is killed leaves the running item alone; its own task, by id or by file, fails it', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await begin($, w)
+    await row($, BG)
+    expect(nth(w).taskId).toBe('bx1')
+    for (const status of ['failed', 'killed']) {
+      await row($, notification('other99', '/tmp/tasks/other99.output', status), { door: 'delivery', origin: 'task-notification' })
+      expect(nth(w)).toMatchObject({ status: 'waiting' })
+      expect(nth(w).running).toBeDefined()
+    }
+    await row($, notification('other99', '/tmp/tasks/bx1.output', 'killed'), { door: 'delivery', origin: 'task-notification' })
+    expect(nth(w)).toMatchObject({ status: 'failed', code: -1 })
+  })
+
+  test('a row that only mentions background, with no task id or output file, is not a background run', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await begin($, w)
+    await row($, '<bash-stdout>background job stopped by Ctrl-C</bash-stdout>')
+    expect(nth(w).running).toBeUndefined()
+    expect(nth(w).status).toBe('waiting')
+  })
+
+  test('the session ending fails only its own runs, and a /clear fails none', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: 5000 })
+    const w = world(on)
+    on('session.end', (_$, e) => e as never)
+    await start($)
+    await ask($, 'make a')
+    await ask($, 'make b')
+    const [a, b] = [nth(w, 0), nth(w, 1)]
+    await copy($, w, a.id)
+    await row($, `<bash-input>${w.copied[w.copied.length - 1]}</bash-input>`)
+    await copy($, w, b.id)
+    await row($, `<bash-input>${w.copied[w.copied.length - 1]}</bash-input>`)
+    const file = [...w.files.keys()].find(path => path.includes(b.id))!
+    w.files.set(file, JSON.stringify({ ...JSON.parse(w.files.get(file)!), runSession: 'another-session' }))
+    await $.session.end({ reason: 'clear', sessionId: 's' } as never)
+    expect(queued(w).every(one => one.status === 'waiting' && one.running !== undefined)).toBe(true)
+    await $.session.end({ reason: 'other', sessionId: 's' } as never)
+    expect(queued(w).find(one => one.id === a.id)).toMatchObject({ status: 'failed', code: -1 })
+    expect(queued(w).find(one => one.id === b.id)).toMatchObject({ status: 'waiting' })
+  })
+
+  test('the day sweep leaves a recent run alone', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    await begin($, w)
+    const [path] = [...w.files.keys()]
+    w.files.set(path!, JSON.stringify({ ...nth(w), startedAt: 5000 - 23 * 3_600_000 }))
+    await clock.advance(3000)
+    expect(nth(w)).toMatchObject({ status: 'waiting' })
+    expect(nth(w).running).toBeDefined()
   })
 
   test('the session ending with the run unseen fails it', { options: OPTIONS }, async ($, on) => {

@@ -119,7 +119,7 @@ async function agentName($: Engine, agentId: string): Promise<string> {
 }
 
 async function setStatus($: Engine, item: Item, status: Item['status'], extra: Partial<Item> = {}): Promise<void> {
-  await save($, { ...item, status, ...extra, nonce: undefined, running: undefined, late: undefined, taskId: undefined, startedAt: undefined, runSession: undefined, updated: await $.clock.now() }) // a tick spends the nonce
+  await save($, { ...item, status, ...extra, nonce: undefined, running: undefined, late: undefined, taskId: undefined, taskFile: undefined, startedAt: undefined, runSession: undefined, updated: await $.clock.now() }) // a tick spends the nonce
   await refresh($)
 }
 
@@ -153,10 +153,13 @@ async function settleFromNotification($: Engine, text: string): Promise<void> {
     isSettled = true
   }
   if (isSettled || note.status === 'completed') return
-  // Stopped or failed with no marker: the item of this task, else the only run this session started.
-  const mine = open.filter(one => isRunning(one) && one.runSession === ctx.session)
-  const byTask = mine.filter(one => one.taskId !== undefined && one.taskId === note.task)
-  const found = byTask.length > 0 ? byTask : mine.length === 1 && mine[0]?.taskId === undefined ? mine : []
+  // Stopped or failed with no marker: only the item whose own task this is, by the id or the output file
+  // its ! row named. Another task's end says nothing about it.
+  const found = open.filter(
+    one =>
+      isRunning(one) && one.runSession === ctx.session &&
+      ((one.taskId !== undefined && one.taskId === note.task) || (one.taskFile !== undefined && one.taskFile === note.file)),
+  )
   for (const item of found) await settleUnseen($, item)
   if (found.length > 0) await refresh($)
 }
@@ -435,7 +438,7 @@ export const register: Register = (on, options) => {
             // No marker: the command moved to a background task (its end comes in a notification), or it
             // ended without one. Either way a marker may still arrive from that task, so the nonce is kept as `late`.
             const away = backgrounded(text)
-            if (away !== undefined) await save($, { ...item, ...(away.taskId !== undefined ? { taskId: away.taskId } : {}) })
+            if (away !== undefined) await save($, { ...item, ...(away.taskId !== undefined ? { taskId: away.taskId } : {}), ...(away.file !== undefined ? { taskFile: away.file } : {}) })
             else await save($, { ...item, running: undefined, startedAt: undefined, runSession: undefined, late: item.running })
           }
         }

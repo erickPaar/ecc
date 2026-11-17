@@ -24,6 +24,7 @@ export type Item = {
   startedAt?: number // when that run started: the pane shows it, and a second start is refused while it is set
   runSession?: string // the session whose ! started it: its end settles a run that never reported
   taskId?: string // the background task the ! run moved to, when its first output named one
+  taskFile?: string // that task's output file, as the same row named it
   late?: string // the nonce of a run whose output showed no marker: a background task's end may still carry it
   created: number
   updated: number

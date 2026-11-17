@@ -84,13 +84,14 @@ export function markersIn(text: string): { id: string; nonce: string; code: numb
   return found.reverse()
 }
 
-// What a ! row says when the command moved to a background task: the task's id and output file,
-// when the row names them. The words are the engine's; only what it names is read.
+// What a ! row says when the command moved to a background task: its id, written `(ID: b2rmh8dnx)`, and
+// its output file. A row that names neither is not one (a word "background" in a command's own output).
 export function backgrounded(row: string): { taskId?: string; file?: string } | undefined {
   const out = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/.exec(row)?.[1] ?? ''
-  if (!/background/i.test(out)) return undefined
-  const taskId = /\bID:?\s+([a-z0-9_-]+?)[.,\s]/i.exec(out)?.[1]
-  const file = /(\/[^\s<>"']+\.output)\b/.exec(out)?.[1]
+  if (!/background/i.test(out) || marker(row) !== undefined) return undefined
+  const taskId = /\(ID:\s*([A-Za-z0-9_-]+)\)/.exec(out)?.[1]
+  const file = /(\/[^\s<>"')]+\.output)\b/.exec(out)?.[1]
+  if (taskId === undefined && file === undefined) return undefined
   return { ...(taskId !== undefined ? { taskId } : {}), ...(file !== undefined ? { file } : {}) }
 }
 

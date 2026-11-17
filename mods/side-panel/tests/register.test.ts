@@ -543,6 +543,20 @@ describe('running', () => {
     expect(written(w, 'a4')).toBeUndefined()
   })
 
+  test('a same-name run of another session id is not adopted', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    on('session.id', () => ({ value: 'sid-mine' }) as never)
+    const w = world(on, {
+      czw: 'orchestrator',
+      agents: [],
+      runs: { 'orchestrator--a1.json': runFile('orchestrator', 'a1', { sid: 'sid-other' }), 'orchestrator--a2.json': runFile('orchestrator', 'a2', { sid: 'sid-mine' }) },
+    })
+    await start($, '')
+    await clock.advance(30_000)
+    expect(written(w, 'a1')).toBeUndefined()
+    expect(written(w, 'a2')).toMatchObject({ status: 'stopped' })
+  })
+
   test('a workflow\'s agent the list no longer has ended fine: done, not stopped; the list\'s own word still wins', { options: OPTIONS }, async ($, on) => {
     const clock = mock.clock(on, { now: NOW })
     let n = 0

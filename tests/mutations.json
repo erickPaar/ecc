@@ -2865,5 +2865,47 @@
     "file": "mods/side-panel/hooks/register.tsx",
     "find": "runs.filter(r => r.status === 'running' || r.status === 'failed')",
     "replace": "runs.filter(r => true)"
+  },
+  {
+    "label": "owner-queue: runs · only the item's own task fails on a stopped task",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "((one.taskId !== undefined && one.taskId === note.task) || (one.taskFile !== undefined && one.taskFile === note.file))",
+    "replace": "true"
+  },
+  {
+    "label": "owner-queue: runs · a task id is read from (ID: x)",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "\\(ID:\\s*([A-Za-z0-9_-]+)\\)",
+    "replace": "ID:\\s*([A-Za-z0-9_-]+)\\)x"
+  },
+  {
+    "label": "owner-queue: runs · a row with no id or file is not a background run",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "if (taskId === undefined && file === undefined) return undefined\n",
+    "replace": "\n"
+  },
+  {
+    "label": "owner-queue: runs · the session's end fails only its own runs",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "isRunning(item) && item.runSession === ctx.session) await settleUnseen",
+    "replace": "isRunning(item)) await settleUnseen"
+  },
+  {
+    "label": "owner-queue: runs · a /clear does not fail the runs",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (e.reason !== 'clear') {",
+    "replace": "if (true) {"
+  },
+  {
+    "label": "owner-queue: runs · the day sweep leaves a recent run alone",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "now - (item.startedAt ?? item.updated) > RUN_LIMIT_MS",
+    "replace": "now - (item.startedAt ?? item.updated) > 1000"
+  },
+  {
+    "label": "side-panel: runs · a run of another session id is not adopted",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "one.sid !== mine.sid) continue",
+    "replace": "false) continue"
   }
 ]
