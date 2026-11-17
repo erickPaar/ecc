@@ -203,6 +203,22 @@ function explodeSubshells(input) {
 }
 
 /**
+ * Rewrite the redirection spellings that contain a separator character
+ * (`&>`, `&>>`, `>&file`, `>|`) to a plain `>`, so splitting a command at
+ * `&` and `|` doesn't cut the redirect from its command. fd duplication
+ * (`2>&1`, `>&2`, `>&-`) is left alone.
+ *
+ * @param {string} input
+ * @returns {string}
+ */
+function normalizeRedirects(input) {
+  return String(input || '')
+    .replace(/&>>?/g, '>')
+    .replace(/(^|[^\d>])>&(?=[^\s\d&-])/g, '$1>')
+    .replace(/>\|/g, '>');
+}
+
+/**
  * Split a command line into top-level segments at unquoted shell
  * separators (`;`, `|`, `&`, `&&`, `||`) and across subshells
  * (`$(...)` / backticks). Quoted strings are stripped first so
@@ -213,7 +229,7 @@ function explodeSubshells(input) {
  * @returns {string[]}
  */
 function splitCommandSegments(input) {
-  const stripped = explodeSubshells(stripQuotedStrings(input));
+  const stripped = explodeSubshells(stripQuotedStrings(normalizeRedirects(input)));
   return stripped
     .split(/[;|&]+/)
     .map(segment => segment.replace(/(^|\s)#.*/, '$1').trim())
@@ -336,7 +352,7 @@ function quoteAwareSegments(input) {
     timeTokens = new Set();
   };
 
-  const source = String(input || '');
+  const source = normalizeRedirects(input);
   for (let i = 0; i < source.length; i += 1) {
     const ch = source[i];
     if (escaped) {
@@ -1000,7 +1016,8 @@ function redirectsStdoutToFile(tokens) {
  * @returns {boolean}
  */
 function isDestructiveGit(tokens) {
-  const sub = findGitSubcommand(tokens);
+  // `GIT_DIR=x git ...`, `env -i git ...` and `sudo git ...` run the same git.
+  const sub = findGitSubcommand(unwrapLeadWrappers(tokens, true, true));
   if (!sub) return false;
   const { command, rest } = sub;
 
@@ -1162,7 +1179,7 @@ function isDestructiveGit(tokens) {
     // than /dev/null is gated whether or not it is tracked, because
     // tracking can't be told without running git. `show` needs a
     // `<ref>:<path>` argument; `cat-file` any object.
-    // Not covered: `tee`, `cp`, `2>&1 > file` (segments split at `&`),
+    // Not covered: `| tee f`, `cp`, `2>&1 > file` (segments split at `&`),
     // or a redirect set up by `exec`.
     if (command === 'show' && !rest.some(t => !t.startsWith('-') && t.includes(':'))) return false;
     return redirectsStdoutToFile(rest);

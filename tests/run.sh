@@ -66,6 +66,17 @@ check "gateguard: symbolic-ref of a remote HEAD"            free  "$(gated 'git 
 check "gateguard: replace --list with a pattern"            free  "$(gated 'git replace --list abc*')"
 check "gateguard: show ref:path with stderr to a file"      free  "$(gated 'git show HEAD:a.txt 2> err.log')"
 check "gateguard: show ref:path to a duplicated fd"         free  "$(gated 'git show HEAD:a.txt >&2')"
+check "gateguard: show ref:path to &> file"                 gated "$(gated 'git show HEAD:a.md &> a.md')"
+check "gateguard: show ref:path to &>> file"                gated "$(gated 'git show HEAD:a.md &>> a.md')"
+check "gateguard: show ref:path to >&file"                  gated "$(gated 'git show HEAD:a.md >&a.md')"
+check "gateguard: show ref:path to >| file"                 gated "$(gated 'git show HEAD:a.md >| a.md')"
+check "gateguard: show ref:path to >&2 stays free"          free  "$(gated 'git show HEAD:a.md >&2')"
+check "gateguard: show ref:path 2>&1 stays free"            free  "$(gated 'git show HEAD:a.md 2>&1')"
+check "gateguard: VAR=val before update-ref"                gated "$(gated 'GIT_DIR=x git update-ref refs/heads/w abc')"
+check "gateguard: VAR=val before reset --hard"              gated "$(gated 'GIT_DIR=x git reset --hard')"
+check "gateguard: env -i before update-ref"                 gated "$(gated 'env -i git update-ref refs/heads/w abc')"
+check "gateguard: env VAR=val before reset --hard"          gated "$(gated 'env GIT_DIR=x git reset --hard')"
+check "gateguard: VAR=val before a read-only git"           free  "$(gated 'GIT_DIR=x git status')"
 check "gateguard: commit-tree writes only an object"        free  "$(gated 'git commit-tree abc123 -m x')"
 
 # An rm inside the session's own scratchpad passes; the input is a subagent's, which carries the
