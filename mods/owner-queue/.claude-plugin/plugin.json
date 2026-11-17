@@ -1,6 +1,6 @@
 {
   "name": "owner-queue",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "description": "One queue, in a side pane of every session, of the commands only you run: sessions add to it instead of writing commands in prose and can list, remove or mark items done, a guard refuses held commands, Copy puts the command on your clipboard, and the item ticks itself when you run it with !.",
   "types": "./types/index.d.ts",
   "userConfig": {

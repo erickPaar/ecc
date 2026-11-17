@@ -2771,6 +2771,144 @@
     "replace": ""
   },
   {
+    "label": "owner-queue: runs · a running item is not next",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "&& !isRunning(one) && blocker(one, items) === undefined",
+    "replace": "&& blocker(one, items) === undefined"
+  },
+  {
+    "label": "owner-queue: runs · the model's run of a running command is held",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (going !== undefined) return { deny",
+    "replace": "if (false) return { deny"
+  },
+  {
+    "label": "owner-queue: runs · a repeated start keeps the first run",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (isRunning(item) && item.running !== undefined && text.includes(item.running)) {",
+    "replace": "if (false) {"
+  },
+  {
+    "label": "owner-queue: runs · a start records its time",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "running: item.nonce, startedAt: now, runSession: ctx.session }",
+    "replace": "running: item.nonce, runSession: ctx.session }"
+  },
+  {
+    "label": "owner-queue: runs · a background task's notification settles the run",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (origin === 'task-notification') {",
+    "replace": "if (false) {"
+  },
+  {
+    "label": "owner-queue: runs · a notification's marker must carry the run's nonce",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "one.nonce === (item.running ?? item.late)",
+    "replace": "true"
+  },
+  {
+    "label": "owner-queue: runs · a stopped task with no marker fails the run",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (isSettled || note.status === 'completed') return",
+    "replace": "return"
+  },
+  {
+    "label": "owner-queue: runs · a run with no marker keeps its nonce for a late notice",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "runSession: undefined, late: item.running })",
+    "replace": "runSession: undefined })"
+  },
+  {
+    "label": "owner-queue: runs · the session's end fails its unseen runs",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (e.reason !== 'clear') {",
+    "replace": "if (false) {"
+  },
+  {
+    "label": "owner-queue: runs · a day-old run is failed",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "now - (item.startedAt ?? item.updated) > RUN_LIMIT_MS",
+    "replace": "false"
+  },
+  {
+    "label": "owner-queue: runs · Copy refuses a running item",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (isRunning(current)) {",
+    "replace": "if (false) {"
+  },
+  {
+    "label": "side-panel: runs · a reload re-adopts its running runs",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "    await adopt($)\n",
+    "replace": "\n"
+  },
+  {
+    "label": "side-panel: runs · only this session's runs are adopted",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "one.session !== mine.session) continue",
+    "replace": "false) continue"
+  },
+  {
+    "label": "side-panel: runs · a workflow agent the list lost is done",
+    "file": "mods/side-panel/hooks/runs.ts",
+    "find": "type === 'workflow-subagent' ? 'done' : 'stopped'",
+    "replace": "'stopped'"
+  },
+  {
+    "label": "side-panel: runs · an idle agent is done",
+    "file": "mods/side-panel/hooks/runs.ts",
+    "find": "if (status === 'idle' && type !== 'teammate') return 'done'",
+    "replace": ""
+  },
+  {
+    "label": "side-panel: runs · remote settled runs are only counted",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "runs.filter(r => r.status === 'running' || r.status === 'failed')",
+    "replace": "runs.filter(r => true)"
+  },
+  {
+    "label": "owner-queue: runs · only the item's own task fails on a stopped task",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "((one.taskId !== undefined && one.taskId === note.task) || (one.taskFile !== undefined && one.taskFile === note.file))",
+    "replace": "true"
+  },
+  {
+    "label": "owner-queue: runs · a task id is read from (ID: x)",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "\\(ID:\\s*([A-Za-z0-9_-]+)\\)",
+    "replace": "ID:\\s*([A-Za-z0-9_-]+)\\)x"
+  },
+  {
+    "label": "owner-queue: runs · a row with no id or file is not a background run",
+    "file": "mods/owner-queue/hooks/queue.ts",
+    "find": "if (taskId === undefined && file === undefined) return undefined\n",
+    "replace": "\n"
+  },
+  {
+    "label": "owner-queue: runs · the session's end fails only its own runs",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "isRunning(item) && item.runSession === ctx.session) await settleUnseen",
+    "replace": "isRunning(item)) await settleUnseen"
+  },
+  {
+    "label": "owner-queue: runs · a /clear does not fail the runs",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "if (e.reason !== 'clear') {",
+    "replace": "if (true) {"
+  },
+  {
+    "label": "owner-queue: runs · the day sweep leaves a recent run alone",
+    "file": "mods/owner-queue/hooks/register.tsx",
+    "find": "now - (item.startedAt ?? item.updated) > RUN_LIMIT_MS",
+    "replace": "now - (item.startedAt ?? item.updated) > 1000"
+  },
+  {
+    "label": "side-panel: runs · a run of another session id is not adopted",
+    "file": "mods/side-panel/hooks/register.tsx",
+    "find": "one.sid !== mine.sid) continue",
+    "replace": "false) continue"
+  },
+  {
     "label": "gateguard: update-ref gated whatever its form",
     "file": "scripts/hooks/gateguard-fact-force.js",
     "find": "    // from the command text without running git, so all forms are gated:\n    // `<ref> <sha>`, `-d`, and `--stdin`.\n    return true;",

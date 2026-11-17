@@ -524,6 +524,63 @@ describe('running', () => {
     expect(w.lists()).toBe(asked)
   })
 
+  const runFile = (session: string, id: string, extra: object = {}) => ({ session, id, label: `run ${id}`, type: 'Explore', isBackground: true, started: NOW - 10 * 60_000, status: 'running', beat: NOW - 100_000, ...extra })
+  const written = (w: { written: Map<string, string> }, id: string) =>
+    [...w.written.entries()].filter(([path]) => path.includes(`--${id}.json`)).map(([, text]) => JSON.parse(text) as Record<string, unknown>).pop()
+
+  test('a reload re-adopts this session\'s own running runs: they keep beating, or settle when the list lost them; other sessions\' stay untouched', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, {
+      czw: 'orchestrator',
+      agents: [{ id: 'a1', status: 'running' }],
+      runs: { 'orchestrator--a1.json': runFile('orchestrator', 'a1'), 'orchestrator--a2.json': runFile('orchestrator', 'a2'), 'other--a3.json': runFile('other', 'a3'), 'orchestrator--a4.json': runFile('orchestrator', 'a4', { status: 'done', finished: NOW - 5000 }) },
+    })
+    await start($, '')
+    await clock.advance(30_000)
+    expect(written(w, 'a1')).toMatchObject({ status: 'running', beat: NOW + 30_000 })
+    expect(written(w, 'a2')).toMatchObject({ status: 'stopped', finished: NOW })
+    expect(written(w, 'a3')).toBeUndefined()
+    expect(written(w, 'a4')).toBeUndefined()
+  })
+
+  test('a same-name run of another session id is not adopted', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    on('session.id', () => ({ value: 'sid-mine' }) as never)
+    const w = world(on, {
+      czw: 'orchestrator',
+      agents: [],
+      runs: { 'orchestrator--a1.json': runFile('orchestrator', 'a1', { sid: 'sid-other' }), 'orchestrator--a2.json': runFile('orchestrator', 'a2', { sid: 'sid-mine' }) },
+    })
+    await start($, '')
+    await clock.advance(30_000)
+    expect(written(w, 'a1')).toBeUndefined()
+    expect(written(w, 'a2')).toMatchObject({ status: 'stopped' })
+  })
+
+  test('a workflow\'s agent the list no longer has ended fine: done, not stopped; the list\'s own word still wins', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    let n = 0
+    on('agent.spawn', () => ({ model: 'm', agentId: `w${++n}` }) as never)
+    const w = world(on, { czw: 'orchestrator', agents: [{ id: 'w2', status: 'failed' }] })
+    await start($, '')
+    const flow = () => $.agent.spawn({ tool_use_id: `t${n}`, prompt: 'p', description: 'step', subagentType: 'workflow-subagent', background: false, fork: false, parentModel: 'opus' } as never)
+    await flow()
+    await flow()
+    await clock.advance(30_000)
+    expect(written(w, 'w1')).toMatchObject({ status: 'done', finished: NOW + 30_000 })
+    expect(written(w, 'w2')).toMatchObject({ status: 'failed' })
+  })
+
+  test('an agent the list shows idle has finished its work: done, not running with live beats', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }) as never)
+    const w = world(on, { czw: 'orchestrator', agents: [{ id: 'a1', status: 'idle' }] })
+    await start($, '')
+    await spawn($, 'a1')
+    await clock.advance(30_000)
+    expect(written(w, 'a1')).toMatchObject({ status: 'done' })
+  })
+
   test('a spawn whose run cannot be written still answers the spawn', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: NOW })
     on('agent.spawn', () => ({ model: 'm', agentId: 'a1' }) as never)
@@ -610,6 +667,21 @@ describe('the remote section', () => {
     expect(shown.indexOf('remote r1')).toBeLessThan(shown.indexOf('docs'))
     expect(shown.indexOf('docs')).toBeLessThan(shown.indexOf('remote r2'))
     expect(shown).not.toContain('Running') // the remote runs are not this machine's
+  })
+
+  test('settled remote runs are only counted, never listed; running and failed ones are', { options: REMOTE }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const run = (id: string, extra: object) => ({ session: 'api-record', id, label: `remote ${id}`, type: 'Explore', isBackground: true, started: NOW - 120_000, beat: NOW - 5_000, status: 'running', ...extra })
+    world(on, {
+      remote: {
+        exitCode: 0,
+        stdout: answer([{ pid: 1, name: 'api-record', cwd: '/w/a', status: 'busy' }], [run('r1', {}), run('s1', { status: 'stopped', finished: NOW - 60_000 }), run('s2', { status: 'stopped', finished: NOW - 90_000 }), run('d1', { status: 'done', finished: NOW - 60_000 }), run('f1', { status: 'failed', finished: NOW - 60_000 })], ''),
+      },
+    })
+    await start($, 'coordinator')
+    const shown = await drawn($)
+    for (const k of ['remote r1', 'remote f1', '2 stopped', '1 done']) expect(shown).toContain(k)
+    for (const k of ['remote s1', 'remote s2', 'remote d1']) expect(shown).not.toContain(k)
   })
 
   test('a host that does not answer shows red, and what it showed before is gone', { options: REMOTE }, async ($, on) => {

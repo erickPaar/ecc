@@ -1,6 +1,6 @@
 {
   "name": "side-panel",
-  "version": "0.4.0",
+  "version": "0.5.1",
   "description": "Panes beside the transcript of the sessions you name: status (open pull requests, each new head with a Review button, sections your own command prints, and what runs on a remote host over ssh), aws (time left on an SSO login) and today (merged today, heads waiting for a first review); keys 1-4 switch tabs.",
   "types": "./types/index.d.ts",
   "userConfig": {

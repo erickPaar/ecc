@@ -23,6 +23,7 @@ export type Today = { merged: Merged[]; read: number; error?: string } // read: 
 // One subagent run, as a session wrote it to ~/.local/state/side-panel/runs/.
 export type Run = {
   session: string // the name of the session that started it
+  sid?: string // that session's id, when it could say: a reload adopts only runs of its own id
   id: string // the agent's id
   label: string // its description, one line, cut short; never the prompt
   type: string // the agent type

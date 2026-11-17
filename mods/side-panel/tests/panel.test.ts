@@ -75,6 +75,15 @@ describe('the review prompt', () => {
   })
 })
 
+describe('sections, old settled runs', () => {
+  test('a stopped or done run older than an hour is not listed, and counts nowhere', () => {
+    const NOW = 10 * 86_400_000
+    const old = (id: string, status: 'stopped' | 'done') => ({ session: 's', id, label: id, type: 'workflow-subagent', isBackground: false, started: NOW - 9 * 3600_000, status, finished: NOW - 4 * 3600_000 }) as never
+    expect(sections([old('a', 'stopped'), old('b', 'done')], NOW)).toEqual([])
+    expect(categories([old('a', 'stopped')], NOW)).toEqual([])
+  })
+})
+
 describe('sections', () => {
   test('headings, tones and blank lines', () => {
     expect(lines('## Sessions\n● api needs you\n✓ docs\n⠋ worker\n\n## Disk\n✓ 27% used  \n')).toEqual([

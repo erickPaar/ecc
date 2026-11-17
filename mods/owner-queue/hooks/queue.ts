@@ -55,6 +55,55 @@ export function blocker(item: Item, items: readonly Item[]): Item | undefined {
   return first !== undefined && first.status !== 'done' && first.status !== 'removed' ? first : undefined
 }
 
+// The owner started this item's command with ! and its end has not been seen: it is neither next
+// nor to be started again.
+export function isRunning(item: Item): boolean {
+  return item.status === 'waiting' && item.running !== undefined
+}
+
+// "09:05", in the local time of the machine.
+export function clockTime(ms: number): string {
+  const at = new Date(ms)
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+}
+
+// The running item whose command this is, so a second start can be refused.
+export function runningFor(items: readonly Item[], command: string): Item | undefined {
+  const wanted = command.trim()
+  return items.find(one => isRunning(one) && one.command !== '' && (one.command.trim() === wanted || (one.running !== undefined && command.includes(one.running))))
+}
+
+// The marker lines (oq:<id>:<nonce>:<code>) in a text, last first: a background task's output file,
+// or the notification that carries its tail.
+export function markersIn(text: string): { id: string; nonce: string; code: number }[] {
+  const found: { id: string; nonce: string; code: number }[] = []
+  for (const line of text.replace(/[\u0000\r]/g, '').split('\n')) {
+    const [, id, nonce, code] = /^\s*oq:([a-z0-9]+):([a-z0-9]+):(\d+)\s*$/.exec(line) ?? []
+    if (id !== undefined && nonce !== undefined) found.push({ id, nonce, code: Number(code) })
+  }
+  return found.reverse()
+}
+
+// What a ! row says when the command moved to a background task: its id, written `(ID: b2rmh8dnx)`, and
+// its output file. A row that names neither is not one (a word "background" in a command's own output).
+export function backgrounded(row: string): { taskId?: string; file?: string } | undefined {
+  const out = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/.exec(row)?.[1] ?? ''
+  if (!/background/i.test(out) || marker(row) !== undefined) return undefined
+  const taskId = /\(ID:\s*([A-Za-z0-9_-]+)\)/.exec(out)?.[1]
+  const file = /(\/[^\s<>"')]+\.output)\b/.exec(out)?.[1]
+  if (taskId === undefined && file === undefined) return undefined
+  return { ...(taskId !== undefined ? { taskId } : {}), ...(file !== undefined ? { file } : {}) }
+}
+
+// A background task's notification: its task, output file and how it ended. Undefined for any other row.
+export function notice(text: string): { task?: string; file?: string; status: string } | undefined {
+  if (!text.includes('<task-notification')) return undefined
+  const field = (tag: string) => new RegExp(`<${tag}>\\s*([^<]*?)\\s*</${tag}>`).exec(text)?.[1]
+  const task = field('task-id')
+  const file = field('output-file')
+  return { ...(task !== undefined ? { task } : {}), ...(file !== undefined ? { file } : {}), status: field('status') ?? '' }
+}
+
 // The items still open, in the order asked: what waits or failed. An item's number is its place here.
 export function openItems(items: readonly Item[]): Item[] {
   return items.filter(one => one.status === 'waiting' || one.status === 'failed').sort((a, b) => a.created - b.created)
@@ -68,7 +117,7 @@ export function numberOf(item: Item, items: readonly Item[]): number | undefined
 
 // The first item the owner can act on now: waiting (not failed) and not after an open item.
 export function nextItem(items: readonly Item[]): Item | undefined {
-  return openItems(items).find(one => one.status === 'waiting' && blocker(one, items) === undefined)
+  return openItems(items).find(one => one.status === 'waiting' && !isRunning(one) && blocker(one, items) === undefined)
 }
 
 const HOUR = 3_600_000
@@ -136,10 +185,12 @@ export function byLine(item: Pick<Item, 'status' | 'by'>): string {
 export function summary(items: readonly Item[]): string {
   const open = openItems(items)
   if (open.length === 0) return TEXT.empty
-  const waiting = open.filter(one => one.status === 'waiting').length
-  const failed = open.length - waiting
+  const running = open.filter(isRunning).length
+  const waiting = open.filter(one => one.status === 'waiting').length - running
+  const failed = open.length - waiting - running
   const next = nextItem(items)
   return [
+    running > 0 ? `${running} running` : undefined,
     waiting > 0 ? `${waiting} waiting` : undefined,
     failed > 0 ? `${failed} failed` : undefined,
     next !== undefined ? `next: ${(next.why || next.command).split('\n')[0]}` : undefined,
@@ -160,7 +211,7 @@ export function listing(items: readonly Item[], now: number, isAll: boolean): st
       const head = [
         number !== undefined ? `#${number}` : '-',
         item.id,
-        item === next ? 'next' : item.status,
+        item === next ? 'next' : isRunning(item) ? `running since ${clockTime(item.startedAt ?? item.updated)}` : item.status,
         item.kind ?? kindOf(item.command, undefined),
         `from ${who(item.from, item.agent)}`,
         first !== undefined ? `after #${numberOf(first, items) ?? first.id} (${first.id})` : undefined,
@@ -214,6 +265,9 @@ export const TEXT = {
   badId: (id: string) => `Not changed: ${JSON.stringify(id)} is not an item id (ids are lowercase letters and digits; owner_queue_list shows them).`,
   missing: (id: string) => `Not changed: no item ${id} in the queue.`,
   finished: (id: string, status: string) => `Not changed: ${id} is ${status} already.`,
+  alreadyRunning: (since: string) => `Already running since ${since}: wait for it to end.`,
+  runningNow: (since: string) => `running since ${since}`,
+  stoppedUnseen: 'no result was seen: the task stopped or the session ended first',
   running: (id: string) => `Not changed: the owner is running ${id} now; its own run ticks it.`,
   needsText: (what: string) => `Not changed: give a ${what}; the owner reads it in the pane.`,
   changed: (id: string, status: string) =>
