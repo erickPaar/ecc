@@ -2769,5 +2769,83 @@
     "file": "mods/side-panel/hooks/register.tsx",
     "find": "{(groups.find(g => g.session === s.name)?.runs ?? []).map(r => runLine(ui, r, at, '    ', 'rr'))}",
     "replace": ""
+  },
+  {
+    "label": "gateguard: update-ref gated whatever its form",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "    // from the command text without running git, so all forms are gated:\n    // `<ref> <sha>`, `-d`, and `--stdin`.\n    return true;",
+    "replace": "    // from the command text without running git, so all forms are gated:\n    // `<ref> <sha>`, `-d`, and `--stdin`.\n    return rest.includes('-d') || rest.includes('--delete');"
+  },
+  {
+    "label": "gateguard: symbolic-ref write is gated",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "return positional.length >= 2 && positional[0] === 'HEAD';",
+    "replace": "return false;"
+  },
+  {
+    "label": "gateguard: symbolic-ref -d is gated",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "      if (t === '-d' || t === '--delete') return true;\n      if (t.startsWith('-')) continue;\n      positional",
+    "replace": "      if (t.startsWith('-')) continue;\n      positional"
+  },
+  {
+    "label": "gateguard: symbolic-ref gates only HEAD",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "positional.length >= 2 && positional[0] === 'HEAD'",
+    "replace": "positional.length >= 2"
+  },
+  {
+    "label": "gateguard: symbolic-ref -m value is skipped",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "      if (t === '-m') { i += 1; continue; }\n",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: replace is gated",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "    return rest.length > 0;",
+    "replace": "    return false;"
+  },
+  {
+    "label": "gateguard: replace --list stays free",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "    if (rest.some(t => t === '-l' || t === '--list' || t.startsWith('--format'))) return false;\n",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: show gated only for ref:path",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "    if (command === 'show' && !rest.some(t => !t.startsWith('-') && t.includes(':'))) return false;\n",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: cat-file redirect is gated",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "if (command === 'show' || command === 'cat-file') {",
+    "replace": "if (command === 'show') {"
+  },
+  {
+    "label": "gateguard: only stdout redirects count",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "    if (m[1] !== '' && m[1] !== '1') continue;\n",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: fd duplication is not a file",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "    if (target === '' || target.startsWith('&')) continue;\n",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: redirect to /dev/null is free",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "    if (target === '/dev/null') continue;\n",
+    "replace": ""
+  },
+  {
+    "label": "gateguard: redirect attached to the word",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "/(\\d*)>>?\\|?([^>]*)$/.exec(tokens[i])",
+    "replace": "/^(\\d*)>>?\\|?(.*)$/.exec(tokens[i])"
   }
 ]
