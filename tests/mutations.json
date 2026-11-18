@@ -3029,5 +3029,11 @@
     "file": "scripts/hooks/gateguard-fact-force.js",
     "find": "findGitSubcommand(unwrapLeadWrappers(tokens, true, true))",
     "replace": "findGitSubcommand(tokens)"
+  },
+  {
+    "label": "gateguard: each subagent keeps its own retry state",
+    "file": "scripts/hooks/gateguard-fact-force.js",
+    "find": "return agent ? `${base}-agent-${agent}` : base;",
+    "replace": "return base;"
   }
 ]
