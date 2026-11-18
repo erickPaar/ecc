@@ -8,19 +8,19 @@
       "name": "ecc",
       "source": "./",
       "description": "Guards before destructive commands, lost local work and check suppressions, safe worktrees, verification loop, learning, Flutter tooling, strategic compaction and session save/resume",
-      "version": "0.6.0"
+      "version": "0.6.1"
     },
     {
       "name": "owner-queue",
       "source": "./mods/owner-queue",
       "description": "A mod: the commands only you run, in one queue in a pane of every session, with Copy; sessions add, list, remove and mark items done, a guard refuses held commands, and items tick themselves when you run them with !",
-      "version": "0.3.1"
+      "version": "0.4.2"
     },
     {
       "name": "side-panel",
       "source": "./mods/side-panel",
       "description": "A mod: a pane beside the transcript with the open pull requests of your repositories, a Review button on each head nobody reviewed yet, and sections your own command prints",
-      "version": "0.1.0"
+      "version": "0.5.1"
     }
   ],
   "description": "Erick's Claude Code plugins"
