@@ -1200,6 +1200,32 @@ describe('a run the owner started', () => {
     expect(nth(w).running).toBeUndefined()
   })
 
+  test('its end is seen from the output file by the timer when no notification reaches the plugin', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { item, nonce } = await begin($, w)
+    await row($, BG)
+    await clock.advance(3000)
+    expect(nth(w).status).toBe('waiting')
+    w.files.set('/tmp/tasks/bx1.output', `tests ok\noq:${item.id}:${nonce}:0\n`)
+    await clock.advance(3000)
+    expect(nth(w)).toMatchObject({ status: 'done' })
+    expect(nth(w).running).toBeUndefined()
+  })
+
+  test('the timer ignores a marker of another run in the output file', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { item } = await begin($, w)
+    await row($, BG)
+    w.files.set('/tmp/tasks/bx1.output', `oq:${item.id}:wrongnonce:0\n`)
+    await clock.advance(3000)
+    expect(nth(w).status).toBe('waiting')
+    expect(nth(w).running).toBeDefined()
+  })
+
   test('a background end with a failing code fails the item; wording of the first row does not matter', { options: OPTIONS }, async ($, on) => {
     mock.clock(on, { now: 5000 })
     const w = world(on)
