@@ -164,6 +164,29 @@ async function settleFromNotification($: Engine, text: string): Promise<void> {
   if (found.length > 0) await refresh($)
 }
 
+// Settles a run whose background task wrote its marker, by reading the output file its ! row named.
+// The engine skips this plugin's session.append hook for the task's end notification (another plugin
+// above it continues past), so the timer looks for the marker instead of waiting for that event.
+const TAIL_BYTES = 65536
+
+async function settleFromFiles($: Engine, list: readonly Item[]): Promise<void> {
+  for (const item of list) {
+    const file = item.taskFile
+    if (item.status !== 'waiting' || file === undefined || !file.startsWith('/')) continue
+    const nonce = item.running ?? item.late
+    if (nonce === undefined) continue
+    try {
+      // The marker is the last line: only the tail of a long output is read.
+      const { size } = await $.fs.stat(file)
+      const offset = Math.max(0, size - TAIL_BYTES)
+      const ran = markersIn(await $.fs.read(file, { offset, length: size - offset })).find(one => one.id === item.id && one.nonce === nonce)
+      if (ran !== undefined) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', { code: ran.code })
+    } catch {
+      // No file yet, or unreadable: the next tick looks again.
+    }
+  }
+}
+
 // Fails the runs nobody settled for a day.
 async function sweepRunning($: Engine, list: readonly Item[]): Promise<void> {
   const now = await $.clock.now()
@@ -330,7 +353,7 @@ export const register: Register = (on, options) => {
     const now = await refresh($)
     await tellFailures($, now)
     if (ctx.paneMode === 'auto' && visible(now, await $.clock.now()).length > 0) void showPane($)
-    $.clock.every(3000, () => void refresh($).then(async list => { await sweepRunning($, list); return tellFailures($, list) }))
+    $.clock.every(3000, () => void refresh($).then(async list => { await settleFromFiles($, list); await sweepRunning($, list); return tellFailures($, list) }))
     // The ages in the pane move on with the clock, not with the queue.
     $.clock.every(60_000, () => $.ui.invalidate('ui.render'))
     return next(e)
