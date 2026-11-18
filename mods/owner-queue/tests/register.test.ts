@@ -31,7 +31,16 @@ function world(on: On, { cwdFails = false, isFull = false, isPlaced = false, bra
       .filter(path => path.startsWith(`${e.path}/`))
       .map(path => ({ name: path.slice(e.path!.length + 1), kind: 'file' as const, size: files.get(path)!.length, mtimeMs: 0, isLink: false })),
   }))
-  on('fs.read', (_$, e) => ({ value: files.get(e.path) ?? '' }) as never)
+  on('fs.read', (_$, e) => {
+    const text = files.get(e.path) ?? ''
+    const range = e as { offset?: number; length?: number }
+    return { value: range.offset === undefined ? text : text.slice(range.offset, range.offset + (range.length ?? text.length)) } as never
+  })
+  on('fs.stat', (_$, e) => {
+    const text = files.get(e.path)
+    if (text === undefined) throw new Error('no such file')
+    return { value: { kind: 'file', size: text.length, mtimeMs: 0, isLink: false } } as never
+  })
   on('fs.write', (_$, e) => {
     if (isFull) throw new Error('disk full')
     files.set(e.path, e.text)
@@ -1212,6 +1221,31 @@ describe('a run the owner started', () => {
     await clock.advance(3000)
     expect(nth(w)).toMatchObject({ status: 'done' })
     expect(nth(w).running).toBeUndefined()
+  })
+
+  test('the timer settles a failing exit, from the real moved-to-background sentence', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { item, nonce } = await begin($, w)
+    const file = '/tmp/claude-1000/-home-x/abc/tasks/b2rmh8dnx.output'
+    await row($, `<bash-stdout>Command did not complete within its 120s timeout and was moved to the background (ID: b2rmh8dnx). Output is being written to: ${file}</bash-stdout><bash-stderr></bash-stderr>`)
+    expect(nth(w)).toMatchObject({ taskId: 'b2rmh8dnx', taskFile: file })
+    w.files.set(file, `${'x'.repeat(200_000)}\noq:${item.id}:${nonce}:2\n`)
+    await clock.advance(3000)
+    expect(nth(w)).toMatchObject({ status: 'failed', code: 2 })
+  })
+
+  test('the timer ignores another item\'s id and a file path that is not absolute', { options: OPTIONS }, async ($, on) => {
+    const clock = mock.clock(on, { now: 5000 })
+    const w = world(on)
+    await start($)
+    const { nonce } = await begin($, w)
+    await row($, '<bash-stdout>moved to the background (ID: bx1). Output is being written to: /tmp/tasks/bx1.output</bash-stdout>')
+    w.files.set('/tmp/tasks/bx1.output', `oq:otherid:${nonce}:0\n`)
+    await clock.advance(3000)
+    expect(nth(w).status).toBe('waiting')
+    expect(nth(w).running).toBeDefined()
   })
 
   test('the timer ignores a marker of another run in the output file', { options: OPTIONS }, async ($, on) => {

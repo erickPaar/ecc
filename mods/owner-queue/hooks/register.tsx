@@ -167,6 +167,8 @@ async function settleFromNotification($: Engine, text: string): Promise<void> {
 // Settles a run whose background task wrote its marker, by reading the output file its ! row named.
 // The engine skips this plugin's session.append hook for the task's end notification (another plugin
 // above it continues past), so the timer looks for the marker instead of waiting for that event.
+const TAIL_BYTES = 65536
+
 async function settleFromFiles($: Engine, list: readonly Item[]): Promise<void> {
   for (const item of list) {
     const file = item.taskFile
@@ -174,7 +176,10 @@ async function settleFromFiles($: Engine, list: readonly Item[]): Promise<void> 
     const nonce = item.running ?? item.late
     if (nonce === undefined) continue
     try {
-      const ran = markersIn(await $.fs.read(file)).find(one => one.id === item.id && one.nonce === nonce)
+      // The marker is the last line: only the tail of a long output is read.
+      const { size } = await $.fs.stat(file)
+      const offset = Math.max(0, size - TAIL_BYTES)
+      const ran = markersIn(await $.fs.read(file, { offset, length: size - offset })).find(one => one.id === item.id && one.nonce === nonce)
       if (ran !== undefined) await setStatus($, item, ran.code === 0 ? 'done' : 'failed', { code: ran.code })
     } catch {
       // No file yet, or unreadable: the next tick looks again.
