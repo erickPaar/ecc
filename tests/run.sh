@@ -448,5 +448,23 @@ for mod in "$ROOT"/mods/*/; do
   check "mod $name: claude plugin validate" pass "$(cd /tmp && claude plugin validate "$mod" >/dev/null 2>&1 && echo pass || echo fail)"
 done
 
+# `claude plugin update` compares versions only: a change merged without a new version never
+# reaches an installed plugin (18/11, #21's gate fix stayed at 0.6.0).
+for dir in . mods/*; do
+  [[ -f "$ROOT/$dir/.claude-plugin/plugin.json" ]] || continue
+  name=$(jq -r .name "$ROOT/$dir/.claude-plugin/plugin.json")
+  version=$(jq -r .version "$ROOT/$dir/.claude-plugin/plugin.json")
+  listed=$(jq -r --arg n "$name" '.plugins[] | select(.name == $n) | .version' "$ROOT/.claude-plugin/marketplace.json")
+  check "$name: the marketplace lists its plugin.json version" "$version" "$listed"
+  if base=$(git -C "$ROOT" merge-base HEAD origin/main 2>/dev/null) && [[ $base != $(git -C "$ROOT" rev-parse HEAD) ]]; then
+    if [[ $dir == . ]]; then changed=$(git -C "$ROOT" diff --name-only "$base" HEAD -- . ':!mods' ':!tests' ':!*.md' ':!.claude-plugin/marketplace.json' ':!.github' | head -1)
+    else changed=$(git -C "$ROOT" diff --name-only "$base" HEAD -- "$dir" ':!*.md' ":!$dir/tests" | head -1); fi
+    if [[ -n $changed ]]; then
+      before=$(git -C "$ROOT" show "$base:$dir/.claude-plugin/plugin.json" 2>/dev/null | jq -r .version)
+      check "$name: a change since main ($changed) comes with a new version" new "$([[ $before != "$version" ]] && echo new || echo "same $version")"
+    fi
+  fi
+done
+
 rm -rf "$HOME_STATE"
 exit $fail
