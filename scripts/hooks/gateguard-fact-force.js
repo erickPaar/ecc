@@ -1422,7 +1422,16 @@ function hashSessionKey(prefix, value) {
   return `${prefix}-${crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 24)}`;
 }
 
+// A subagent shares its parent's session_id and sends its own agent_id. Keying the state by both
+// gives every agent its own retry memory: no unlocking each other, no lost writes between
+// parallel agents on one file.
 function resolveSessionKey(data) {
+  const base = resolveBaseSessionKey(data);
+  const agent = sanitizeSessionKey(data && (data.agent_id || data.agentId));
+  return agent ? `${base}-agent-${agent}` : base;
+}
+
+function resolveBaseSessionKey(data) {
   const directCandidates = [data && data.session_id, data && data.sessionId, data && data.session && data.session.id, process.env.CLAUDE_SESSION_ID, process.env.ECC_SESSION_ID];
 
   for (const candidate of directCandidates) {

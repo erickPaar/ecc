@@ -42,6 +42,23 @@ check "gateguard: routine command passes"     allow "$(gate 'ls -la' s2)"
 reason=$(bash_input 'rm -rf dist' s3 | "$ROOT/bin/node-run" "$ROOT/bin/run-hook.js" "$ROOT/scripts/hooks/gateguard-fact-force.js" | jq -r .hookSpecificOutput.permissionDecisionReason)
 check "gateguard: asks for the exact same retry" yes "$([[ $reason == *"exact same command"* ]] && echo yes || echo no)"
 
+# Subagents send the parent's session_id plus their own agent_id. Each agent keeps its own retry
+# memory: one agent's refusal never unlocks the command for another, and parallel agents
+# never overwrite each other's refusals.
+sub() { # command session agent
+  decision "$(jq -cn --arg c "$1" --arg s "$2" --arg a "$3" \
+    '{session_id: $s, agent_id: $a, agent_type: "independent-reviewer", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}' \
+    | "$ROOT/bin/node-run" "$ROOT/bin/run-hook.js" "$ROOT/scripts/hooks/gateguard-fact-force.js")"; }
+check "subagent: rm -rf denied first"                 deny  "$(sub 'rm -rf /w/clone' sp1 a1)"
+check "subagent: identical retry by the same agent"   allow "$(sub 'rm -rf /w/clone' sp1 a1)"
+check "subagent: a changed command is gated again"    deny  "$(sub 'rm -rf /w/clone2' sp1 a1)"
+check "subagent: another agent is not unlocked"       deny  "$(sub 'rm -rf /w/clone' sp1 a2)"
+check "subagent: the parent is not unlocked"          deny  "$(sub 'rm -rf /w/clone' sp1 '')"
+check "subagent: its own retry still allowed"         allow "$(sub 'rm -rf /w/clone' sp1 a2)"
+pids=(); for i in 1 2 3 4 5 6 7 8; do sub "rm -rf /w/p$i" sp2 "pa$i" >/dev/null & pids+=($!); done; wait "${pids[@]}"
+refused=0; for i in 1 2 3 4 5 6 7 8; do [[ $(sub "rm -rf /w/p$i" sp2 "pa$i") == deny ]] && refused=$((refused+1)); done
+check "subagent: parallel agents, no retry refused"   0 "$refused"
+
 # Plumbing that moves a ref or overwrites a file is held like its porcelain twin. Each call is a
 # fresh session, and the hold is told from the first-command prompt by the word "Destructive".
 gated() { local r; r=$(bash_input "$1" "g-$BASHPID-$RANDOM" | "$ROOT/bin/node-run" "$ROOT/bin/run-hook.js" "$ROOT/scripts/hooks/gateguard-fact-force.js" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""'); [[ $r == *Destructive* ]] && echo gated || echo free; }
