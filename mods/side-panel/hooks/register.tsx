@@ -1,13 +1,15 @@
 // side-panel: panes beside the transcript of the sessions you name. status: the open pull requests
 // of your repositories (a Review button on each head nobody reviewed yet) and the sections your own
 // command prints; aws: time left on an AWS SSO login; today: what merged today and the heads waiting
-// for a first review. It reads; it sends only on a press: the review prompt, or the AWS login to the
+// for a first review; and, in status, what runs on another machine when `remote` names an ssh host.
+// It reads; it sends only on a press: the review prompt, or the AWS login to the
 // owner's queue. Each is its own engine tab: Ctrl+X Tab, Tab and Enter or a click, Esc.
 import { atom, read, update } from 'claude-code'
 import type { Engine, Register } from 'claude-code'
 
-import type { Asked, Aws, Board, Pull, Run, Today } from '../types'
+import type { Asked, Aws, Board, Pull, Remote, Run, Today } from '../types'
 import { AWS_WARN, awsProfile, GH_FIELDS, MERGED_FIELDS, TODAY_FOR, key, left, lines, logins, merged, prompt, pulls, repos, seconds, ssoExpiry, ssoStartUrl, state, today } from './panel'
+import { readAnswer, REMOTE_WAIT_S, remoteArgv, remoteError, remoteHost, remoteScript } from './remote'
 import { BEAT_EVERY, elapsed, fileName, fromAgent, isOld, label, parse, sections as runSections } from './runs'
 
 const PANE = 'side-panel'
@@ -19,9 +21,10 @@ const todayList = atom({ plugin: 'side-panel', key: 'today' } as const, { merged
 const board = atom({ plugin: 'side-panel', key: 'board' } as const, { pulls: [], lines: [] } as Board)
 const asked = atom({ plugin: 'side-panel', key: 'asked' } as const, [] as Asked[])
 const title = atom({ plugin: 'side-panel', key: 'title' } as const, '')
+const remote = atom({ plugin: 'side-panel', key: 'remote' } as const, { host: '', read: 0, sessions: [], runs: [], lines: [] } as Remote)
 
 // Set by register; a reload runs it again.
-const cfg = { sessions: '', repos: [] as string[], word: '', reviewers: [] as string[], template: '', sections: '', every: 60, profile: 'management' }
+const cfg = { sessions: '', repos: [] as string[], word: '', reviewers: [] as string[], template: '', sections: '', every: 60, profile: 'management', remote: '', remoteLabel: '', remoteSections: '' }
 // Your own login, read once from gh when `reviewers` is empty; and whether the refresh timer runs.
 let me: string | undefined
 let isTicking = false
@@ -108,9 +111,9 @@ async function readRuns($: Engine): Promise<void> {
 type Ran = { exitCode: number | null; stdout: string; stderr: string } // null: never ran, or did not finish
 
 // $.process.run rejects when the command cannot start or outlives its timeout; that is a failure too.
-async function run($: Engine, argv: string[]): Promise<Ran> {
+async function run($: Engine, argv: string[], init?: { stdin?: string; timeoutMs?: number }): Promise<Ran> {
   try {
-    return await $.process.run(argv)
+    return await (init ? $.process.run(argv, init) : $.process.run(argv))
   } catch (err) {
     return { exitCode: null, stdout: '', stderr: err instanceof Error ? err.message : String(err) }
   }
@@ -160,6 +163,22 @@ async function readBoard($: Engine): Promise<void> {
   await readAws($)
   await readToday($)
   await readRuns($)
+  await readRemote($)
+}
+
+// The remote machine: one read-only ssh call. A failure replaces what was shown, so nothing stale
+// passes for current.
+async function readRemote($: Engine): Promise<void> {
+  if (cfg.remote === '') return
+  const ran = await run($, remoteArgv(cfg.remote), { stdin: remoteScript(cfg.remoteSections), timeoutMs: (REMOTE_WAIT_S + 10) * 1000 })
+  const read = (await $.clock.now()) || 1
+  const answer = readAnswer(ran.stdout)
+  const error = remoteError(cfg.remote, ran, answer.cut === true)
+  const found: Remote =
+    error !== undefined
+      ? { host: cfg.remote, read, sessions: [], runs: [], lines: [], error }
+      : { host: cfg.remote, read, sessions: answer.sessions, runs: answer.runs, lines: answer.lines, ...(answer.note !== undefined ? { note: answer.note } : {}) }
+  await update($, remote, () => found)
 }
 
 // The AWS login's expiry: the profile's SSO start URL from ~/.aws/config, then the latest token for
@@ -317,6 +336,82 @@ async function todayView($: Engine, ui: ReturnType<Engine['ui']['resolve']>) {
   )
 }
 
+// One subagent run's line, as the Running section draws it.
+function runLine(ui: ReturnType<Engine['ui']['resolve']>, r: ReturnType<typeof runSections>[number]['runs'][number], at: number, indent: string, keyPrefix: string) {
+  const { Text } = ui
+  return (
+    <Text
+      key={`${keyPrefix}-${r.session}-${r.id}`}
+      wrap="truncate-end"
+      dimColor={r.status !== 'running'}
+      color={r.isStale || r.status === 'failed' ? 'red' : r.status === 'done' ? 'green' : undefined}
+    >
+      {indent}
+      {r.status === 'running' ? (r.isStale ? '? stale' : `⠋ ${elapsed(at - r.started)}`) : r.status === 'done' ? '✓' : r.status === 'failed' ? '✗' : '■'} {r.label} · {r.type}
+      {r.model ? ` · ${r.model}` : ''}
+      {r.effort ? ` · ${r.effort}` : ''}
+    </Text>
+  )
+}
+
+// The remote section: its sessions, each with its subagent runs beneath, the runs of sessions not
+// listed, then the remote command's lines; or, red, why the machine could not be read.
+async function remoteView($: Engine, ui: ReturnType<Engine['ui']['resolve']>, at: number) {
+  const { Box, Text } = ui
+  const there = await read($, remote)
+  const groups = runSections(there.runs, at)
+  const named = new Set(there.sessions.map(s => s.name))
+  const orphans = groups.filter(g => !named.has(g.session))
+  return (
+    <Box flexDirection="column">
+      <Box marginTop={1}>
+        <Text bold>{cfg.remoteLabel}</Text>
+        {cfg.remoteLabel !== cfg.remote && <Text dimColor> {cfg.remote}</Text>}
+      </Box>
+      {there.read === 0 && there.error === undefined && <Text dimColor>not read yet</Text>}
+      {there.error !== undefined && (
+        <Text color="red" wrap="truncate-end">
+          ● {there.error}
+        </Text>
+      )}
+      {there.read !== 0 && there.error === undefined && there.sessions.length === 0 && groups.length === 0 && <Text dimColor>no Claude sessions</Text>}
+      {there.sessions.map(s => (
+        <Box key={`rs-${s.name}-${s.cwd}`} flexDirection="column">
+          <Text color={s.status === 'busy' ? 'blue' : undefined} dimColor={s.status !== undefined && s.status !== 'busy'} wrap="truncate-end">
+            {s.status === 'busy' ? '⠋' : '·'} {s.name}
+            {s.status ? ` · ${s.status}` : ''}
+            {s.kind && s.kind !== 'interactive' ? ` · ${s.kind}` : ''}
+            {s.started ? ` · ${elapsed(at - s.started)}` : ''}
+          </Text>
+          {(groups.find(g => g.session === s.name)?.runs ?? []).map(r => runLine(ui, r, at, '    ', 'rr'))}
+        </Box>
+      ))}
+      {orphans.map(group => (
+        <Box key={`ro-${group.session}`} flexDirection="column">
+          <Text color="blue">{group.session}</Text>
+          {group.runs.map(r => runLine(ui, r, at, '    ', 'ro'))}
+        </Box>
+      ))}
+      {there.lines.map((line, i) =>
+        line.kind === 'heading' ? (
+          <Box key={`rh${i}`} marginTop={1}>
+            <Text bold>{line.text}</Text>
+          </Box>
+        ) : (
+          <Text key={`rl${i}`} color={line.tone} wrap="truncate-end">
+            {line.text}
+          </Text>
+        ),
+      )}
+      {there.note !== undefined && (
+        <Text dimColor color="red" wrap="truncate-end">
+          {there.note}
+        </Text>
+      )}
+    </Box>
+  )
+}
+
 export const register: Register = (on, options) => {
   cfg.sessions = (options.sessions as string) ?? ''
   cfg.repos = repos((options.repos as string) ?? '')
@@ -326,10 +421,13 @@ export const register: Register = (on, options) => {
   cfg.sections = (options.sections as string) ?? ''
   cfg.every = seconds((options.every as string) ?? '60')
   cfg.profile = awsProfile((options.aws_profile as string) ?? '')
+  cfg.remote = remoteHost((options.remote as string) ?? '')
+  cfg.remoteLabel = ((options.remote_label as string) ?? '').trim() || cfg.remote
+  cfg.remoteSections = (options.remote_sections as string) ?? ''
   me = undefined
   isTicking = false
   stopBeat() // a reload must not double the beats
-  const hasContent = cfg.repos.length > 0 || cfg.sections !== ''
+  const hasContent = cfg.repos.length > 0 || cfg.sections !== '' || cfg.remote !== ''
 
   // The writer, in every session that loads the mod: one file per subagent run.
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
@@ -486,21 +584,10 @@ export const register: Register = (on, options) => {
         {running.map(group => (
           <Box key={`s-${group.session}`} flexDirection="column">
             <Text color="blue">{group.session}</Text>
-            {group.runs.map(r => (
-              <Text
-                key={`r-${r.session}-${r.id}`}
-                wrap="truncate-end"
-                dimColor={r.status !== 'running'}
-                color={r.isStale || r.status === 'failed' ? 'red' : r.status === 'done' ? 'green' : undefined}
-              >
-                {'  '}
-                {r.status === 'running' ? (r.isStale ? '? stale' : `⠋ ${elapsed(at - r.started)}`) : r.status === 'done' ? '✓' : r.status === 'failed' ? '✗' : '■'} {r.label} · {r.type}
-                {r.model ? ` · ${r.model}` : ''}
-                {r.effort ? ` · ${r.effort}` : ''}
-              </Text>
-            ))}
+            {group.runs.map(r => runLine(ui, r, at, '  ', 'r'))}
           </Box>
         ))}
+        {cfg.remote !== '' && (await remoteView($, ui, at))}
         {now.lines.map((line, i) =>
           line.kind === 'heading' ? (
             <Box key={`h${i}`} marginTop={1}>

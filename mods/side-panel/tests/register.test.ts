@@ -20,6 +20,7 @@ type World = {
   runs?: Record<string, object> // run files in ~/.local/state/side-panel/runs, by name
   agents?: { id: string; status: string }[] // what $.agent.list answers
   cwdFails?: boolean // $.session.cwd rejects
+  remote?: { exitCode: number; stdout: string; stderr?: string } | 'rejects' // what the ssh call answers
 }
 
 // What a session answers beneath the plugin: gh, the sections command, the environment and the
@@ -61,8 +62,15 @@ function world(on: On, w: World = {}) {
     called.push({ ...e })
     return { result: 'queued' } as never
   })
+  const stdins: string[] = []
   on('process.run', (_$, e) => {
     ran.push([...e.argv])
+    if (e.argv[0] === 'timeout' && e.argv[2] === 'ssh') {
+      stdins.push(e.init?.stdin ?? '')
+      if (w.remote === 'rejects') return { deny: 'timed out after 25000 ms' } as never
+      const r = w.remote ?? { exitCode: 0, stdout: '@@sessions\n@@runs\n@@sections\n@@end 0\n' }
+      return { value: { stderr: '', ...r } } as never
+    }
     if (e.argv[0] === 'gh' && e.argv.includes('merged')) return { value: { exitCode: 0, stdout: JSON.stringify(w.merged ?? []), stderr: '' } } as never
     order.push(e.argv[0])
     if (w.rejects === 'gh' && e.argv[0] === 'gh') return { deny: 'timed out after 30000 ms' } as never
@@ -96,7 +104,7 @@ function world(on: On, w: World = {}) {
     submitted.push(e.text)
     return { text: e.text } as never
   })
-  return { ran, opened, submitted, order, called, titles, written, lists: () => lists }
+  return { ran, opened, submitted, order, called, titles, written, stdins, lists: () => lists }
 }
 
 type T = Parameters<Parameters<typeof test>[2] & Function>[0]
@@ -545,5 +553,97 @@ describe('running', () => {
     expect(shown).not.toContain('run a5')
     expect(shown.indexOf('run a1')).toBeLessThan(shown.indexOf('run a3'))
     expect(w.ran.find(argv => argv[0] === 'rm')).toEqual(['rm', '-f', expect.stringMatching(/content--a5\.json$/)])
+  })
+})
+
+describe('the remote section', () => {
+  const REMOTE = { ...OPTIONS, remote: 'desk', remote_label: 'Desktop', remote_sections: 'list-jobs' }
+  const NOW = Date.parse('2026-11-10T12:00:00Z')
+  const answer = (sessions: object[], runs: object[], sections: string, end = 0) =>
+    ['@@sessions', ...sessions.map(s => `500 ${JSON.stringify(s)}`), '@@runs', ...runs.map(r => JSON.stringify(r)), '@@sections', sections, `@@end ${end}`, ''].join('\n')
+
+  test('with no remote set, nothing goes over ssh and the section is not drawn', { options: OPTIONS }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const w = world(on)
+    await start($, 'coordinator')
+    expect(w.ran.some(argv => argv.includes('ssh'))).toBe(false)
+    expect(await drawn($)).not.toContain('Desktop')
+  })
+
+  test('one bounded ssh call per refresh, the script on stdin, the command in it', { options: REMOTE }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on)
+    await start($, 'coordinator')
+    const calls = () => w.ran.filter(argv => argv[0] === 'timeout')
+    expect(calls()).toHaveLength(1)
+    expect(calls()[0]).toEqual(expect.arrayContaining(['ssh', 'BatchMode=yes', 'desk', 'bash -l -s']))
+    expect(w.stdins[0]).toContain('list-jobs')
+    await clock.advance(60_000)
+    expect(calls()).toHaveLength(2)
+  })
+
+  test('a remote alone is enough to show the pane', { options: { sessions: 'coordinator', remote: 'desk' } }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const w = world(on)
+    await start($, 'coordinator')
+    expect(w.opened[0]).toBe('side-panel')
+    const shown = await drawn($)
+    expect(shown).toContain('"desk"')
+    expect(shown).toContain('no Claude sessions')
+  })
+
+  test('sessions with their runs beneath, other runs after, then the command\'s lines', { options: REMOTE }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const run = (session: string, id: string) => ({ session, id, label: `remote ${id}`, type: 'Explore', isBackground: true, started: NOW - 120_000, beat: NOW - 5_000, status: 'running' })
+    world(on, {
+      remote: {
+        exitCode: 0,
+        stdout: answer(
+          [{ pid: 1, name: 'api-record', cwd: '/w/a', status: 'busy', kind: 'interactive', startedAt: NOW - 3600_000 }, { pid: 2, name: 'docs', cwd: '/w/d', status: 'idle' }],
+          [run('api-record', 'r1'), run('gone', 'r2')],
+          '## rc\n⠋ job-7 · make check',
+        ),
+      },
+    })
+    await start($, 'coordinator')
+    const shown = await drawn($)
+    for (const k of ['"Desktop"', '" ","desk"', '"⠋"," ","api-record"," · busy",""," · 1h 00m"', 'remote r1', '"·"," ","docs"," · idle"', '"gone"', 'remote r2', '"rc"', '⠋ job-7 · make check']) expect(shown).toContain(k)
+    expect(shown.indexOf('api-record')).toBeLessThan(shown.indexOf('remote r1'))
+    expect(shown.indexOf('remote r1')).toBeLessThan(shown.indexOf('docs'))
+    expect(shown.indexOf('docs')).toBeLessThan(shown.indexOf('remote r2'))
+    expect(shown).not.toContain('Running') // the remote runs are not this machine's
+  })
+
+  test('a host that does not answer shows red, and what it showed before is gone', { options: REMOTE }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const setup: { remote: { exitCode: number; stdout: string; stderr?: string } } = { remote: { exitCode: 0, stdout: answer([{ pid: 1, name: 'api-record', cwd: '/w' }], [], '') } }
+    world(on, setup)
+    await start($, 'coordinator')
+    expect(await drawn($)).toContain('api-record')
+    setup.remote = { exitCode: 124, stdout: '', stderr: '# Tailscale SSH requires an additional check.\n# To authenticate, visit: https://login.tailscale.com/a/x\n' }
+    await clock.advance(60_000)
+    const shown = await drawn($)
+    expect(shown).toContain('desk waits for a Tailscale login: run `ssh desk true` in a terminal')
+    expect(shown).toContain('"red"')
+    expect(shown).not.toContain('api-record')
+  })
+
+  test('an ssh call that times out on this side still says why, and the other sections stay', { options: REMOTE }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    world(on, { remote: 'rejects' })
+    await start($, 'coordinator')
+    const shown = await drawn($)
+    expect(shown).toMatch(/desk is not answering \(asleep or off\?\): [^"]*timed out after 25000 ms/)
+    expect(shown).toContain('#12')
+    expect(shown).toContain('27% used')
+  })
+
+  test('a failing remote command is a dim note under the sessions', { options: REMOTE }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    world(on, { remote: { exitCode: 0, stdout: answer([{ pid: 1, name: 'api-record', cwd: '/w' }], [], '', 2) } })
+    await start($, 'coordinator')
+    const shown = await drawn($)
+    expect(shown).toContain('api-record')
+    expect(shown).toContain('remote_sections: exit 2')
   })
 })

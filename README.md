@@ -130,6 +130,11 @@ A third plugin, `side-panel@erick`: panes beside the transcript, for the session
   - **Reader:** the status pane reads the folder each `every` seconds and deletes files finished, or last marked alive, a day ago.
   - So the section covers the sessions that load this mod. Install it in user scope (`/plugin install side-panel@erick`) so every session does, and keep `sessions` naming the session that shows the pane.
   - Background `Bash` runs are not listed: the engine does not give a mod their end.
+- **Remote** (in status, when `remote` names an ssh host): what runs on another machine, under the heading `remote_label`. Each refresh makes one read-only call, `timeout 15 ssh -T -o BatchMode=yes <host> bash -l -s`, with a short script on stdin. It shows:
+  - the Claude sessions alive there, from `~/.claude/sessions/<pid>.json`: name (else the folder's), busy or idle, how long it has run. A file counts only when its process is alive, is `claude`, and started when the file says (`procStart`), so files left from before a reboot do not show;
+  - each session's subagent runs beneath it, from this mod's run files on that machine (so install the mod there too), and the runs of sessions not listed after them;
+  - the lines `remote_sections` prints there, in the sections format.
+  - When the host does not answer, one red line says why (asleep or off, ssh's own error, or Tailscale SSH waiting for a browser login, with the command to run), and nothing read earlier stays shown. A failing `remote_sections` is a dim note under the rest. `timeout` is GNU coreutils' (on macOS, `brew install coreutils`).
 
 ```
 /plugin install side-panel@erick
@@ -144,6 +149,9 @@ A third plugin, `side-panel@erick`: panes beside the transcript, for the session
 | `review_prompt` | what Review sends, as if you typed it; `{repo}`, `{number}`, `{sha}` and `{title}` are filled in. `{title}` is written by whoever opened the pull request: use it only for repositories whose authors you trust |
 | `sections` | the command whose output shows below the pull requests, run with `bash -c` |
 | `aws_profile` | the AWS SSO profile the aws tab watches (default `management`) |
+| `remote` | an ssh host or `~/.ssh/config` alias whose sessions, runs and `remote_sections` show in status; it needs a key or Tailscale SSH (BatchMode never asks for a password). Empty shows none |
+| `remote_label` | the remote section's heading, for example `Desktop`; empty uses the host |
+| `remote_sections` | a command run on the remote host (bash, login shell) whose output shows in the remote section, in the sections format |
 | `every` | seconds between reads (default 60; under 15 means 60) |
 
 Set them in `/plugin`, or in `~/.claude/settings.json`:
@@ -155,7 +163,10 @@ Set them in `/plugin`, or in `~/.claude/settings.json`:
       "sessions": "coordinator",
       "repos": "my-org/api my-org/infra",
       "reviewed": "Verdict",
-      "sections": "~/bin/panel-sections.sh"
+      "sections": "~/bin/panel-sections.sh",
+      "remote": "desktop",
+      "remote_label": "Desktop",
+      "remote_sections": "~/bin/remote-sections.sh"
     }
   }
 }
